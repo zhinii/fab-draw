@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.openai/
+.wrangler/
+outputs/
+*.log
+*.local
+server-config.json
