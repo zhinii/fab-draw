@@ -43,6 +43,28 @@ test('IDs must be unique, metadata is retained, and mutation cannot replace shap
   assert.throws(()=>applyOperations(withShapes(s),[{op:'update',id:s.id,changes:{id:'replacement'}}]),/cannot replace/);
 });
 
+test('group metadata survives project serialization and updates without changing geometry',()=>{
+  const s=createShape('rect',{x:13,y:29,width:80,height:40,rotation:37,groupId:'assembly-1',groupName:'Front panel'});
+  const document=validateDocument(JSON.parse(JSON.stringify(withShapes(s))));
+  assert.equal(document.shapes[0].groupId,'assembly-1');assert.equal(document.shapes[0].groupName,'Front panel');
+  const updated=applyOperations(document,[{op:'update',id:s.id,changes:{groupId:'assembly-2',groupName:'New assembly'}}]);
+  assert.deepEqual(getShapePoints(updated.shapes[0]),getShapePoints(s));
+  assert.equal(updated.shapes[0].groupId,'assembly-2');assert.equal(updated.shapes[0].groupName,'New assembly');
+  const ungrouped=applyOperations(updated,[{op:'update',id:s.id,changes:{groupId:null,groupName:null}}]);
+  assert.equal(ungrouped.shapes[0].groupId,null);assert.equal(ungrouped.shapes[0].groupName,null);
+});
+
+test('group metadata rejects invalid values, respects locks, and copies start ungrouped',()=>{
+  for(const props of [{groupId:3},{groupId:' '},{groupId:'a'.repeat(151)},{groupName:false},{groupName:''},{groupName:'a'.repeat(121)}])assert.throws(()=>createShape('rect',props),/group(Id|Name) must/);
+  const s=createShape('rect',{groupId:'assembly',groupName:'Assembly'});
+  assert.throws(()=>applyOperations(withShapes(s),[{op:'update',id:s.id,changes:{groupId:{id:'nested'}}}]),/groupId must/);
+  const locked={...s,locked:true};
+  assert.throws(()=>applyOperations(withShapes(locked),[{op:'update',id:s.id,changes:{groupId:null,groupName:null}}]),/locked/);
+  const copy=duplicateShape(s);assert.equal(copy.groupId,undefined);assert.equal(copy.groupName,undefined);
+  const batch=applyOperations(withShapes(s),[{op:'duplicate',id:s.id}]);
+  assert.equal(batch.shapes[0].groupId,'assembly');assert.equal(batch.shapes[1].groupId,undefined);assert.equal(batch.shapes[1].groupName,undefined);
+});
+
 test('locked shapes reject movement and deletion but allow a separate unlock',()=>{
   const s=createShape('rect',{locked:true});const d=withShapes(s);
   assert.throws(()=>applyOperations(d,[{op:'update',id:s.id,changes:{x:100}}]),/locked/);

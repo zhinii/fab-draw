@@ -18,7 +18,7 @@ The CURRENT document is authoritative: mm, X right, Y down; shape x,y is the top
 reply <=3000 characters; at most 60 operations. needsInput:true MUST have operations:[]; do not execute one interpretation while asking a question that changes it. Speak of changes as proposals until the application applies them. Never claim structural safety, fitted garments, working mechanisms or measured fabrication accuracy based on a drawing alone.
 
 Supported operations, no other forms:
-{"op":"add","shape":{"type":"rect|ellipse|line|path|text|plate|gear","name":"short name","x":20,"y":20,"width":80,"height":40,"rotation":0,"role":"cut|score|engrave|reference","locked":false,"provenance":"specified|estimated|calculated","params":{}}}
+{"op":"add","shape":{"type":"rect|ellipse|line|path|profile|text|plate|gear","name":"short name","x":20,"y":20,"width":80,"height":40,"rotation":0,"role":"cut|score|engrave|reference","locked":false,"provenance":"specified|estimated|calculated","params":{}}}
 {"op":"update","id":"exact current ID","changes":{"width":100}}
 {"op":"delete","id":"exact current ID"}
 {"op":"duplicate","id":"exact current ID","dx":10,"dy":10}
@@ -26,11 +26,12 @@ Supported operations, no other forms:
 Use only the listed fields. New IDs may be omitted; the application creates them. Update/delete/duplicate IDs must already exist in CURRENT document. Do not reference a newly added shape later in the same reply. Never mutate locked shapes. Copy is duplicate. Preserve unrelated shapes and values. Delete only the objects explicitly requested. Resolve this/it using selectedIds, then clear conversational context; ask if ambiguous.
 
 Shape types:
+profile: deterministic editable silhouette recipe. REQUIRED profile:"butterfly"|"heart"|"tree"|"fish", plus width and optional height in mm. Use this for ordinary requests for these named objects, including a single closed butterfly silhouette; DO NOT invent raw points for a standard butterfly, heart, tree or fish. The application expands the recipe to a validated editable path and visibly labels its built-in outline. Choose dimensions and placement as requested. Height defaults to the recipe's proportions if omitted. Example: {"op":"add","shape":{"type":"profile","profile":"butterfly","name":"Butterfly","x":100,"y":60,"width":100,"height":75,"rotation":0,"role":"cut","locked":false,"provenance":"estimated","params":{}}}. For a photograph or explicitly custom outline, use path and describe remaining interpretation; never substitute a recipe for a specific traced sketch. Other objects remain arbitrary paths. Never claim a recipe was independently drawn by AI; say you are using an editable outline as a starting point.
 rect: a rectangle; params.cornerRadius may round corners.
 ellipse: a circle when width==height, otherwise ellipse.
 line: points:[[0,0],[width,height]], may have zero width OR height.
-path: additional points:[[localX,localY],...] measured in mm relative to x,y; closed:boolean; smooth:boolean. Points must describe the actual local width and height. Optional contours:[[[x,y],...],...] for compound profiles. Limit 240 points per contour and 8 contours. closed:true for silhouettes; smooth:true for organic profiles, false for engineering corners. Build recognizable named object profiles as paths with sufficient detail, normally 20-60 points. Do not substitute generic rectangles or labels for animals or objects. Assume side view if useful and state the chosen view. Keep cut profiles continuous.
-text: additional text:string, plain vector stroke lettering; only A-Z, a-z, 0-9, space and simple punctuation supported, not Chinese glyph outlines. Use role:engrave by default. Do not claim stencil lettering; bridges must be designed.
+path: REQUIRED top-level shape fields points:[[localX,localY],...], closed:boolean, smooth:boolean. These fields MUST NOT be inside params; path params is {}. Points are mm relative to x,y and must describe the actual local width and height. Optional top-level contours:[[[x,y],...],...] for compound profiles. Limit 240 points per contour and 8 contours. closed:true for silhouettes; smooth:true for organic profiles, false for engineering corners. Build recognizable named object profiles as paths with sufficient detail, normally 20-60 points. A butterfly needs a narrow body and FOUR recognisable wing lobes, not one heart-shaped pair of wings. Do not substitute generic rectangles or labels for animals or objects. Assume side view if useful and state the chosen view. Keep cut profiles continuous. Example triangle: {"type":"path","name":"Triangle","x":20,"y":20,"width":40,"height":30,"rotation":0,"role":"cut","locked":false,"provenance":"specified","params":{},"points":[[20,0],[40,30],[0,30]],"closed":true,"smooth":false}.
+text: REQUIRED top-level text:string, never inside params; plain vector stroke lettering; only A-Z, a-z, 0-9, space and simple punctuation supported, not Chinese glyph outlines. Use role:engrave by default. Do not claim stencil lettering; bridges must be designed.
 plate: rectangle with two horizontal-centred through holes. params:{holeDiameter:5,edgeInset:15,cornerRadius:3}; edgeInset is centre-to-nearest-end, hole centres at (edgeInset,height/2) and (width-edgeInset,height/2). Resizing plate width preserves hole diameter and end offsets. Need diameter and edgeInset or explicit permission to choose both for a draft. Never call these holes specified when guessed.
 gear: deterministic involute spur gear. params:{teeth:20,module:2,pressureAngle:20,bore:5}; outside diameter = module*(teeth+2), width=height=outside diameter. Module is mm, pressure angle degrees. Ask for teeth/module/bore (and compatible mate if relevant), or get permission for an educational example. Do not approximate working gears with polygon spikes. Never stretch a gear: change module with matching width and height, or teeth with matching diameter. Mating gear distance is module*(teeth1+teeth2)/2; this is geometric pitch spacing, not measured fit or load validation.
 
@@ -49,6 +50,24 @@ image is a sketch/photo. Written dimensions govern, not pixel proportions. The s
 If feedback is supplied, the previous proposal was rejected atomically and NOTHING changed. Correct the problem against current document. Don't claim it applied. Never offer an unsupported action as if it exists. For explanations or greetings use operations:[], needsInput:false. For ambiguity use operations:[],needsInput:true.`;
 
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
+export const PROFILE_RECIPES=Object.freeze({
+  butterfly:{name:['Butterfly','蝴蝶'],width:100,height:75,smooth:true,points:[[50,8],[53,11],[53,26],[64,9],[81,0],[95,8],[100,26],[91,43],[61,50],[88,54],[92,72],[80,93],[64,100],[53,78],[52,90],[50,96],[48,90],[47,78],[36,100],[20,93],[8,72],[12,54],[39,50],[9,43],[0,26],[5,8],[19,0],[36,9],[47,26],[47,11]]},
+  heart:{name:['Heart','爱心'],width:80,height:75,smooth:true,points:Array.from({length:48},(_,i)=>{const t=i*Math.PI*2/48;return [50+3*16*Math.sin(t)**3,47-3*(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))];})},
+  tree:{name:['Tree','树'],width:70,height:100,smooth:false,points:[[50,0],[78,30],[66,30],[90,57],[73,57],[100,82],[60,82],[60,100],[40,100],[40,82],[0,82],[27,57],[10,57],[34,30],[22,30]]},
+  fish:{name:['Fish','鱼'],width:100,height:60,smooth:true,points:[[0,50],[22,20],[55,10],[80,35],[100,15],[95,50],[100,85],[80,65],[55,90],[22,80]]},
+});
+export function profileShape(profile,props={},language='en') {
+  const recipe=Object.hasOwn(PROFILE_RECIPES,profile)?PROFILE_RECIPES[profile]:null;
+  if(!recipe)throw new Error('unknown_profile_recipe');
+  const allowed=['id','name','type','profile','x','y','width','height','rotation','role','locked','provenance','params'];
+  if(!record(props)||Object.keys(props).some(k=>!allowed.includes(k)))throw new Error('profile_has_unsupported_fields');
+  if(props.params!==undefined&&(!record(props.params)||Object.keys(props.params).length))throw new Error('profile_params_must_be_empty');
+  const width=props.width??recipe.width,height=props.height??recipe.height*width/recipe.width;
+  if(!Number.isFinite(width)||!Number.isFinite(height)||width<.01||height<.01||width>5000||height>5000)throw new Error('profile_dimensions');
+  const xs=recipe.points.map(p=>p[0]),ys=recipe.points.map(p=>p[1]),minX=Math.min(...xs),minY=Math.min(...ys),spanX=Math.max(...xs)-minX,spanY=Math.max(...ys)-minY;
+  const {profile:ignoredProfile,type:ignoredType,...common}=props;
+  return {name:recipe.name[language==='zh'?1:0],x:20,y:20,rotation:0,role:'cut',locked:false,...common,type:'path',width,height,params:{},provenance:'estimated',points:recipe.points.map(([x,y])=>[(x-minX)*width/spanX,(y-minY)*height/spanY]),closed:true,smooth:recipe.smooth};
+}
 const cleanKeys = value => { if (!record(value) || Object.keys(value).some(k => ['__proto__', 'prototype', 'constructor'].includes(k))) throw new Error('schema'); };
 function finiteTree(value, depth = 0) {
   if (depth > 12) throw new Error('schema');
@@ -77,7 +96,7 @@ export function validateTask(body) {
   const feedback = typeof body.feedback==='string' ? body.feedback.slice(0,1200) : undefined;
   return {question:body.question.trim(),language:body.language,document:doc,selectedIds,history,image,feedback};
 }
-export function validateReply(input, {imageConfirmed=true}={}) {
+export function validateReply(input, {imageConfirmed=true,document,language='en'}={}) {
   let result=input;
   if(typeof result==='string') {
     if(result.length>36000)throw new Error('response_size');
@@ -86,10 +105,14 @@ export function validateReply(input, {imageConfirmed=true}={}) {
   cleanKeys(result);
   if(typeof result.reply!=='string'||!result.reply.trim()||result.reply.length>3000||typeof result.needsInput!=='boolean'||!Array.isArray(result.operations)||result.operations.length>60)throw new Error('response');
   finiteTree(result.operations);
+  const profilesUsed=new Set();
   for(const op of result.operations) {
     cleanKeys(op);
     const permitted={add:['op','shape'],update:['op','id','changes'],delete:['op','id'],duplicate:['op','id','dx','dy'],sheet:['op','changes']}[op.op];
     if(!permitted||Object.keys(op).some(k=>!permitted.includes(k)))throw new Error('operations');
+    if(op.op==='add'&&op.shape?.type==='profile') {
+      const profile=op.shape.profile;op.shape=profileShape(profile,op.shape,language);profilesUsed.add(profile);
+    }
     if(['update','delete','duplicate'].includes(op.op)&&(typeof op.id!=='string'||!op.id||op.id.length>120))throw new Error('operations');
     if(op.op==='add'&&(!record(op.shape)||!['rect','ellipse','line','path','text','plate','gear'].includes(op.shape.type)))throw new Error('operations');
     if(['update','sheet'].includes(op.op)&&!record(op.changes))throw new Error('operations');
@@ -97,13 +120,47 @@ export function validateReply(input, {imageConfirmed=true}={}) {
     if(op.op==='add'&&Object.keys(op.shape).some(k=>!shapeFields.includes(k)))throw new Error('operations');
     if(op.op==='update'&&Object.keys(op.changes).some(k=>!shapeFields.includes(k)||['id','type'].includes(k)))throw new Error('operations');
     if(op.op==='sheet'&&Object.keys(op.changes).some(k=>!['width','height','material','thickness'].includes(k)))throw new Error('operations');
+    const object=op.op==='add'?op.shape:op.op==='update'?op.changes:null;
+    const shapeType=op.op==='add'?op.shape.type:op.op==='update'?document?.shapes?.find(s=>s.id===op.id)?.type:null;
+    const extras={rect:[],ellipse:[],plate:[],gear:[],line:['points'],path:['points','contours','closed','smooth'],text:['text']}[shapeType];
+    if(object&&extras&&Object.keys(object).some(k=>!['id','name','type','x','y','width','height','rotation','role','locked','provenance','params',...extras].includes(k)))throw new Error('geometry_field_does_not_belong_to_shape_type');
+    if(object?.params!==undefined) {
+      if(!record(object.params))throw new Error('params');
+      const allowedParams={rect:['cornerRadius'],plate:['holeDiameter','edgeInset','cornerRadius'],gear:['teeth','module','pressureAngle','bore'],ellipse:[],line:[],path:[],text:[]}[shapeType]||['holeDiameter','edgeInset','cornerRadius','teeth','module','pressureAngle','bore'];
+      if(Object.keys(object.params).some(k=>!allowedParams.includes(k)))throw new Error('invalid_params_for_shape_type_points_closed_smooth_text_must_be_top_level_not_params');
+    }
+    if(op.op==='add'&&op.shape.type==='path'&&(!Array.isArray(op.shape.points)||op.shape.points.length<2||typeof op.shape.closed!=='boolean'||typeof op.shape.smooth!=='boolean'))throw new Error('path_requires_top_level_points_closed_smooth');
+    if(op.op==='add'&&op.shape.type==='text'&&(typeof op.shape.text!=='string'||!op.shape.text.trim()))throw new Error('text_requires_top_level_text');
+    if(op.op==='add'&&op.shape.type==='path')fitPathToDeclaredSize(op.shape);
     if(op.op==='duplicate'&&['dx','dy'].some(k=>op[k]!==undefined&&(typeof op[k]!=='number'||!Number.isFinite(op[k]))))throw new Error('operations');
   }
   if(result.needsInput && result.operations.length)throw new Error('clarification_with_changes');
-  for(const field of ['suggestions','assumptions'])if(result[field]!==undefined&&(!Array.isArray(result[field])||result[field].length>(field==='suggestions'?3:6)||result[field].some(v=>typeof v!=='string'||v.length>600)))throw new Error('response');
+  for(const field of ['suggestions','assumptions'])if(result[field]!==undefined&&(!Array.isArray(result[field])||result[field].length>(field==='suggestions'?3:8)||result[field].some(v=>typeof v!=='string'||v.length>600)))throw new Error('response');
   // Enforced outside the language model: an unconfirmed photo cannot mutate a drawing.
   if(!imageConfirmed&&result.operations.length)throw new Error('image_confirmation_required');
-  return {reply:result.reply.trim(),needsInput:!imageConfirmed||result.needsInput,operations:result.operations,suggestions:result.suggestions??[],assumptions:result.assumptions??[]};
+  const assumptions=[...(result.assumptions??[])];
+  if(profilesUsed.size) {
+    const names=[...profilesUsed].map(p=>PROFILE_RECIPES[p].name[language==='zh'?1:0]).join(', ');
+    const notice=language==='zh'?`使用内置可编辑轮廓：${names}。可继续调整尺寸和节点。`:`Uses built-in editable outlines: ${names}. You can change their dimensions and points.`;
+    if(!assumptions.includes(notice))assumptions.push(notice);
+    if(assumptions.length>8)throw new Error('too_many_assumptions');
+  }
+  return {reply:result.reply.trim(),needsInput:!imageConfirmed||result.needsInput,operations:result.operations,suggestions:result.suggestions??[],assumptions};
+}
+function fitPathToDeclaredSize(shape) {
+  if(!Number.isFinite(shape.width)||shape.width<=0||!Number.isFinite(shape.height)||shape.height<=0)throw new Error('path_requires_explicit_width_height');
+  const contours=shape.contours||[shape.points];
+  if(!Array.isArray(contours)||!contours.length||contours.length>8)throw new Error('path_contours');
+  for(const points of [shape.points,...contours])if(!Array.isArray(points)||points.length<(shape.closed?3:2)||points.length>240||points.some(p=>!Array.isArray(p)||p.length!==2||p.some(v=>typeof v!=='number'||!Number.isFinite(v))))throw new Error('path_coordinate_pairs');
+  const all=contours.flat(),xs=all.map(p=>p[0]),ys=all.map(p=>p[1]),minX=Math.min(...xs),minY=Math.min(...ys),width=Math.max(...xs)-minX,height=Math.max(...ys)-minY;
+  if(width<=0||height<=0)throw new Error('path_has_no_area');
+  const mismatch=Math.max(Math.abs(minX),Math.abs(minY),Math.abs(width-shape.width),Math.abs(height-shape.height));
+  if(mismatch<1e-7)return;
+  // Organic drafts preserve their point arrangement while being fitted to the
+  // requested outside size. Exact engineering paths must already agree with it.
+  if(shape.provenance!=='estimated')throw new Error('path_points_must_match_declared_width_height_and_start_at_zero');
+  const transform=([x,y])=>[(x-minX)*shape.width/width,(y-minY)*shape.height/height];
+  shape.points=shape.points.map(transform);if(shape.contours)shape.contours=shape.contours.map(points=>points.map(transform));
 }
 export function providerConfiguration(env={}, override={}) {
   const key=(override.key||env.ALIBABA_API_KEY||'').trim();
@@ -131,7 +188,7 @@ export async function callQwen(task,config,{fetcher=(...args)=>globalThis.fetch(
     const raw=data?.choices?.[0]?.message?.content;
     try {
       if(data?.choices?.[0]?.finish_reason==='length')throw new Error('truncated');
-      const reply=validateReply(raw,{imageConfirmed:!task.image||task.image.confirmed});
+      const reply=validateReply(raw,{imageConfirmed:!task.image||task.image.confirmed,document:task.document,language:task.language});
       if(JSON.stringify(reply).includes(config.key))throw new CadError('response');
       return {...reply,source:'qwen',...(task.image?{perception:{imageStatus:'seen',confirmed:task.image.confirmed}}:{})};
     } catch(error) {

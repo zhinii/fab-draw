@@ -2,18 +2,30 @@
 
 A simple bilingual 2D drawing workspace for a school fab lab: describe a design, answer the assistant's questions, edit the geometry directly, and export it for laser software.
 
+[Open Fab Draw](https://zhinii.github.io/fab-draw/) · [GitHub repository](https://github.com/zhinii/fab-draw)
+
 The drawing is stored as geometry in millimetres. Qwen interprets the request and proposes structured operations; the geometry layer validates and applies them. AI responses are not executable code.
+
+## Try it
+
+1. Open the app and describe a part: **“Make an 80 by 40 mm mounting plate with two 5 mm holes, centred vertically, each 15 mm from its nearest end.”** Review the preview, then choose **Keep it**.
+2. Click the part to enter dimensions, drag it, rotate it, copy it or edit its points. You can also ask **“Make the selected plate 100 mm wide, keeping the holes and end offsets unchanged.”**
+3. Upload a dimensioned sketch and ask **“Read this sketch and list the dimensions for me to confirm.”** Verify the readings before confirming reconstruction.
+4. Save an editable project, or export SVG/DXF for the school's laser software. Check the imported size before cutting.
+
+For a conversation that starts with questions, try **“Make a bracket for my motor.”** For Chinese, select **中文** and try **“画一个80×40毫米的矩形。”**
 
 ## First release
 
-- Conversation beside a large drawing canvas, with English and Chinese interface choices.
+- Tool cards at the top, a large canvas, object cards and an always-visible conversation at the bottom, with English and Chinese interface choices.
 - Manual shapes and paths, editable dimensions, selection, movement, rotation, copying, scaling and point editing.
 - Millimetre project geometry, operation roles for cut, score, engrave and reference, undo/redo, browser recovery and editable project files.
 - A Qwen connection for language and image requests, plus a small local command assistant for supported requests when AI is unavailable.
+- Standard butterfly, heart, tree and fish outlines use Qwen-selected, deterministic profile recipes. A visible note identifies the built-in starting outline; the resulting path and points remain editable.
 - Photo-assisted interpretation of sketches. The assistant can ask for missing dimensions; an undimensioned photograph does not establish an accurate physical scale.
 - SVG and DXF exports, with basic geometry checks before export.
 
-This is a first release for simple 2D parts, outlines, signs and sketches. It is not a complete mechanical constraint solver, garment pattern system, assembly simulator or machine controller. Gears and mounting plates are generated from parameters where supported; a visually plausible arbitrary AI outline is not evidence that mating parts will work.
+This is a first release for simple 2D parts, outlines, signs and sketches. It is not a complete mechanical constraint solver, garment pattern system, assembly simulator or machine controller. Gears, mounting plates and standard profile recipes are generated deterministically from parameters. Other objects can use arbitrary editable paths, but those need visual review: valid geometry alone does not prove that an outline resembles the intended object or that mating parts will work.
 
 ## Run locally
 
@@ -92,11 +104,15 @@ Reference objects are excluded from manufacturing exports. Check that intended c
 
 Photo attachments are interpretation references; they are not raster engraving output. The vector text tool produces single-line lettering for engraving or scoring. It supports Latin letters, digits and basic punctuation, maps lowercase letters to uppercase and rejects unsupported characters. It does not produce Chinese lettering, filled font outlines or stencil bridges.
 
-SVG retains supported arcs and smooth curves. DXF uses polylines with a target curve-flattening tolerance of 0.025 mm and CAD Y-up coordinates; its header declares millimetres. Boolean operations also flatten curves and record a 0.05 mm combined tolerance. Generated involute gears have no backlash or root fillet; low tooth counts can require undercut/profile-shift engineering. Test paired gears and material before using them in a loaded mechanism.
+SVG retains supported arcs and smooth curves. Smooth paths use bounded cubic interpolation through their editable points; arbitrary Bézier control handles are not exposed. DXF uses polylines with a target curve-flattening tolerance of 0.025 mm and CAD Y-up coordinates; its header declares millimetres. Boolean operations also flatten curves and record a 0.05 mm combined tolerance. Generated involute gears have no backlash or root fillet; low tooth counts can require undercut/profile-shift engineering. Test paired gears and material before using them in a loaded mechanism.
 
 ## Verification
 
 The automated tests cover core geometry and assistant/server boundaries. The manual release checks are in [tests/ACCEPTANCE.md](tests/ACCEPTANCE.md). Browser interaction checks, real Qwen replies, export roundtrips and physical cutting are separate levels of evidence; record which were actually performed.
+
+`node scripts/live-smoke.mjs` checks relay health without a model request; explicit `butterfly`, `plate`, `zh` or `photo` arguments make live Qwen requests. The `photo` case requires a local 900 × 600 PNG at `outputs/dimensioned-sketch.png`; this fixture and generated evidence are intentionally excluded from Git.
+
+On 2026-10-24, 63 automated tests and the production build passed; the dependency audit reported zero vulnerabilities. Live Qwen checks covered an exact mounting plate, Chinese rectangle, technical clarification, confirmed reconstruction of a dimensioned sketch and a visually reviewed butterfly recipe with an actual 100 × 75 mm outline and visible built-in attribution. Browser-exported SVG/DXF geometry was independently checked for dimensions, holes, units and excluded photo/credential data. Before the layout rewrite, browser checks covered dimensioned editing, rotated compound-point editing, persistence, tablet/390-pixel phone widths and explicit acknowledgement before accepting proposed deletions. The new top-tool/bottom-conversation layout still needs its final browser recheck. Roundtrips through the school's actual laser software and physical cutting remain pending.
 
 ## Project structure
 

@@ -1,5 +1,5 @@
-import {createShape,applyOperations,validateDocument} from './geometry.mjs';
-import {validateReply,validateTask,PROVIDER_BASES,DEFAULT_BASE} from '../server/cad-system.mjs';
+import {createShape,applyOperations,validateDocument,shapeBounds,preflight} from './geometry.mjs';
+import {validateReply,validateTask,PROVIDER_BASES,DEFAULT_BASE,profileShape,PROFILE_RECIPES} from '../server/cad-system.mjs';
 
 export const DEFAULT_CONNECTION=Object.freeze({url:'https://bnta-robot-lab-connection.zhinii.chatgpt.site/api/cad'});
 const pick=(language,en,zh)=>language==='zh'?zh:en;
@@ -77,15 +77,24 @@ export async function askAssistant(args, {fetcher=globalThis.fetch}={}) {
       throw assistantError('connection',language);
     }
     try {
-      const result=validateReply(data,{imageConfirmed:!image||image.confirmed===true});
+      const result=validateReply(data,{imageConfirmed:!image||image.confirmed===true,document,language});
       // Atomic validation uses the same model as mouse editing and fabrication export.
-      applyOperations(document,result.operations);
+      const preview=applyOperations(document,result.operations),beforeIds=new Set(document.shapes.map(s=>s.id)),updatedIds=new Set(result.operations.filter(o=>o.op==='update').map(o=>o.id));
+      for(const shape of preview.shapes)if(shape.type==='path'&&(!beforeIds.has(shape.id)||updatedIds.has(shape.id))) {
+        const bounds=shapeBounds({...shape,x:0,y:0,rotation:0});
+        if(Math.max(Math.abs(bounds.x),Math.abs(bounds.y),Math.abs(bounds.width-shape.width),Math.abs(bounds.height-shape.height))>1e-5)throw new Error('Path points do not match the declared outside dimensions. Set points to start at local 0,0 and span exactly width and height.');
+      }
+      const introducedError=preflight(preview).find(issue=>issue.severity==='error'&&issue.shapeId&&(!beforeIds.has(issue.shapeId)||updatedIds.has(issue.shapeId)));
+      if(introducedError)throw new Error(introducedError.message);
       if(requestSignal.aborted)throw assistantError(signal?.aborted?'cancelled':'connection',language);
       return {...result,source:'qwen',...(data.perception?{perception:data.perception}:{})};
     } catch(error) {
       if(error.code)throw error;
-      if(attempt===0){task.feedback=`Previous proposal rejected atomically: ${String(error.message).slice(0,700)}. No changes applied. Correct it using the CURRENT document. Return a question with no operations if dimensions remain unresolved.`;continue;}
-      throw assistantError('geometry',language);
+      if(attempt===0){
+        task.history=[...task.history.slice(-9),{role:'assistant',content:JSON.stringify(data).slice(0,4000)}];
+        task.feedback=`Previous proposal rejected atomically: ${String(error.message).slice(0,500)}. No changes applied. Correct it using the CURRENT document. For crossing outlines, walk once around a single simple boundary; never repeat or touch an internal vertex. Use an available profile recipe for a standard butterfly, heart, tree or fish. Return a question with no operations if dimensions remain unresolved.`;continue;
+      }
+      const failure=assistantError('geometry',language);failure.detail=String(error.message).slice(0,800);throw failure;
     }
   }
 }
@@ -98,10 +107,6 @@ function measures(text) {
   const height=text.match(new RegExp('(?:height|high|tall|高)(?:\\s*(?:is|of|to|为|到))?\\s*'+number,'i'))||text.match(new RegExp(number+'\\s*(?:mm|cm|毫米|厘米|in(?:ch(?:es)?)?)?\\s*(?:high|tall|高)','i'));
   return {unit,width:pair?Number(pair[1])*unit:width?Number(width[1])*unit:undefined,height:pair?Number(pair[2])*unit:height?Number(height[1])*unit:undefined};
 }
-const butterfly=[[50,24],[39,9],[19,0],[5,8],[0,26],[9,43],[32,49],[12,54],[8,72],[20,93],[36,100],[47,78],[50,65],[53,78],[64,100],[80,93],[92,72],[88,54],[68,49],[91,43],[100,26],[95,8],[81,0],[61,9],[50,24]];
-const fish=[[0,50],[22,20],[55,10],[80,35],[100,15],[95,50],[100,85],[80,65],[55,90],[22,80]];
-const tree=[[50,0],[78,30],[66,30],[90,57],[73,57],[100,82],[60,82],[60,100],[40,100],[40,82],[0,82],[27,57],[10,57],[34,30],[22,30]];
-const heart=Array.from({length:48},(_,i)=>{const t=i*Math.PI*2/48;return [50+3*16*Math.sin(t)**3,47-3*(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))];});
 function localResult(language,reply,operations=[],suggestions=[],assumptions=[],needsInput=false) {
   return {reply,operations,suggestions,assumptions,needsInput,source:'offline'};
 }
@@ -147,12 +152,10 @@ export function localAssistant({question,language='en',document,selectedIds=[],h
     context=String(previous).toLowerCase()+' '+q;
   }
   const size=measures(context),x=20+doc.shapes.length%6*8,y=20+doc.shapes.length%6*8;
-  const profile=/butterfly|蝴蝶/.test(context)?['Butterfly','蝴蝶',butterfly,100,75]:/heart|爱心|心形/.test(context)?['Heart','爱心',heart,80,75]:/tree|树/.test(context)?['Tree','树',tree,70,100]:/fish|鱼/.test(context)?['Fish','鱼',fish,100,60]:null;
+  const profile=/butterfly|蝴蝶/.test(context)?'butterfly':/heart|爱心|心形/.test(context)?'heart':/tree|树/.test(context)?'tree':/fish|鱼/.test(context)?'fish':null;
   if(profile) {
-    const [en,zh,raw,w,h]=profile,width=size.width||w,height=size.height||h*(width/w);
-    const xs=raw.map(p=>p[0]),ys=raw.map(p=>p[1]),minX=Math.min(...xs),minY=Math.min(...ys),spanX=Math.max(...xs)-minX,spanY=Math.max(...ys)-minY;
-    const points=raw.map(([px,py])=>[(px-minX)/spanX*width,(py-minY)/spanY*height]);
-    const shape=createShape('path',{name:say(en,zh),x,y,width,height,points,closed:true,smooth:en==='Heart',provenance:'estimated'});
+    const {name:[en,zh],width:w,height:h}=PROFILE_RECIPES[profile],width=size.width||w,height=size.height||h*(width/w);
+    const shape=createShape('path',profileShape(profile,{x,y,width,height},language));
     return safe(answer(`Here is a built-in ${en.toLowerCase()} profile, ${width} × ${Math.round(height*100)/100} mm. Drag its points to reshape it.`,`这是内置${zh}轮廓，${width} × ${Math.round(height*100)/100} 毫米。可拖动节点改变外形。`,[{op:'add',shape}],[say('The outline is a suggested silhouette; the displayed outside dimensions are exact.','轮廓为建议造型；显示的外部尺寸为精确值。')]));
   }
   if(/plate|板件|安装板|底板/.test(context)) {

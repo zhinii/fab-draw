@@ -8,11 +8,15 @@ A version 1 document contains its name, units, material sheet and shapes. Shapes
 
 Plate parameters retain hole diameter and centre-to-end distances when outside dimensions change. Gear dimensions are derived from tooth count and module. There is no general constraint solver; arbitrary path points are direct geometry. Converting a generated shape to a path explicitly removes its parameter relationships.
 
+Optional group IDs and names organize related shapes into object cards. Group selection acts on the member shapes; grouping itself does not change their coordinates. Project files preserve these memberships, while duplicated shapes start outside their original groups.
+
 ## Conversation
 
 `src/assistant.mjs` sends a bounded document snapshot, current selection, recent conversation and an optional image to `/api/cad`. The server owns the CAD system prompt and provider configuration. Qwen proposes typed add, update, delete, duplicate and sheet operations. Browser-side validation runs against the current document before a preview is shown. A failed proposal can be repaired once; failures never partly mutate a drawing.
 
 Manual edits cancel an outstanding proposal request, and a revision check prevents late replies from replacing newer edits. Photo confirmation is tied to an image that the vision endpoint reports as seen. Unmeasured features remain estimated. Source images are session references, excluded from exported project/manufacturing geometry.
+
+For common starter objects, Qwen can select a butterfly, heart, tree or fish recipe. The validator expands it into a deterministic editable outline at the requested size and adds a visible attribution. Other objects may use freeform paths; geometric validation does not establish that a freeform outline accurately depicts its subject. Proposed deletions require a separate visible acknowledgement before the user can keep the proposal.
 
 ## Connection
 

@@ -1,6 +1,6 @@
 # Fab Draw release acceptance
 
-This is a test plan, not a record that the checks passed. Record the build/commit, browser, viewport, relay/model, date and result when executing it. Do not include keys, authorization headers, personal images or private conversations in evidence.
+This is a test plan with a dated release-evidence section below. Only checks recorded in that section have execution evidence; the rest remain planned. Record the build/commit, browser, viewport, relay/model, date and result when executing it. Do not include keys, authorization headers, personal images or private conversations in evidence.
 
 ## Automated gate
 
@@ -12,7 +12,7 @@ Run `npm test` and `npm run build`. Geometry checks should include finite-value 
 | --- | --- | --- |
 | First use | Open a fresh project at desktop and tablet widths. | Canvas, conversation and primary tools are understandable; essential controls remain reachable without overlapping the drawing. |
 | Language | Switch English/中文, send a request, then reload. | Visible controls and new assistant replies follow the selection; selection persists; existing names and measurements are preserved. |
-| Basic outline | Request a butterfly profile. | Recognizable editable geometry appears; suggested size and assumptions are apparent. It is not described as dimensionally verified. |
+| Basic outline | Request a butterfly profile. | A recognizable, editable recipe outline appears with exact stated outside dimensions and visible built-in attribution. Estimated details and physical-fit limits remain apparent. |
 | Technical clarification | Request a bracket for a motor without dimensions. | Assistant asks about required dimensions or uses clearly stated assumptions; it does not claim that an unspecified mounting pattern fits. |
 | Exact part | Request an 80 × 40 mm plate, two 5 mm holes, centres 15 mm from each end and on the horizontal centreline. | Geometry and export match the confirmed dimensions. |
 | Conversational edit | Select the plate and request width 100 mm with unchanged hole diameters and end offsets. | Intended object changes; hole diameter is 5 mm; offsets remain 15 mm; unrelated objects do not change. |
@@ -21,6 +21,7 @@ Run `npm test` and `npm run build`. Geometry checks should include finite-value 
 | Local fallback | Disable the relay and use a supported simple local command; then request something beyond it. | Supported local operation works; unsupported request is identified honestly; manual tools remain usable. |
 | Provider errors | Test unavailable relay, invalid route, timeout and cancelled request. | Actionable error, no frozen UI, no duplicate insertion, and no partial drawing mutation. |
 | Response race | While a slow request is pending, edit the design or change project. | A stale response cannot silently overwrite newer geometry or apply to the wrong project. |
+| Proposed deletion | Ask for a change that proposes removing an existing object. | Preview names the objects to remove; Keep it remains disabled until the user explicitly acknowledges those removals. |
 
 ## Editing and persistence
 
@@ -58,11 +59,27 @@ Record the exact model used for vision. A successful text-only request does not 
 
 ## Release evidence
 
-- Automated tests/build: pending.
-- Desktop/tablet browser interactions: pending.
-- Live Qwen text requests: pending.
-- Live Qwen photo requests: pending.
-- School laser software roundtrip: pending.
-- Physical cut and measured fit: pending.
+Recorded **2026-10-24** for the first release at [zhinii.github.io/fab-draw](https://zhinii.github.io/fab-draw/). These checks establish the outcomes below, not completion of every scenario in this plan. Provider calls used the shared CAD relay; vision was tested with `qwen3.7-plus`.
 
-Replace “pending” only with the actual check result and an evidence pointer. Keep unavailable checks visible rather than treating them as passed.
+| Check | Recorded result | Evidence |
+| --- | --- | --- |
+| Automated tests | **Passed:** 63 tests, including profile recipes, strict shape schemas, path dimensions, geometry preflight and group metadata. | `tests/geometry.test.mjs`, `tests/assistant.test.mjs`, `tests/assistant-server.test.mjs`; release test run. |
+| Production build and dependency audit | **Passed:** production build; audit reported 0 vulnerabilities at the time checked. | Release `npm run build` and audit run. |
+| Desktop editing | **Passed:** actual browser drag, exact 110 × 40 mm sizing, 90° rotation and copy preserved 5 mm hole diameters and 15 mm end offsets. | Release browser interaction check. |
+| Point editing and persistence | **Passed:** rotated compound-path node editing and persistence across reload. | Release browser interaction check. |
+| Tablet layout before rewrite | **Passed:** 768 × 1024 viewport had no horizontal overflow; conversation remained accessible. | Release browser viewport check; new layout recheck remains pending. |
+| Phone/language before rewrite | **Passed:** 390-pixel viewport had no horizontal overflow; Chinese selection persisted across reload. | Release browser viewport/persistence check; new layout recheck remains pending. |
+| Deletion acknowledgement | **Passed:** proposed removals were named in the preview and Keep it remained disabled until acknowledgement. | Release browser interaction check before layout rewrite. |
+| New tool-card/bottom-chat layout | **Passed:** desktop 1440 × 960, tablet 768 × 1024 and phone 390 × 844 show top tool cards, central canvas, thumbnail object cards and an always-visible bottom conversation. No horizontal page overflow; conversation body is 160 px on desktop and 177 px on tablet (about eight text lines). | Final release browser snapshots and DOM measurements. |
+| Persistent groups | **Passed:** two object cards were grouped into one named card, rotated about the shared centre, dragged together by the same offset, and retained after reload. | Browser check plus independent transform review for rotated paths and odd-tooth gears; locks prevent partial group transforms. |
+| Live Qwen plate | **Passed:** 80 × 40 mm plate, two 5 mm holes, 15 mm end offsets; no preflight issues. | Local `outputs/live-smoke-plate.json` and `outputs/live-smoke-plate.svg`. |
+| Live Qwen Chinese | **Passed:** Chinese reply and 80 × 40 mm rectangle. | Local `outputs/live-smoke-zh.json` and `outputs/live-smoke-zh.svg`. |
+| Technical clarification | **Passed:** an underspecified motor-bracket request asked about the motor, mounting holes and material. | Release live browser conversation check. |
+| Live vision and confirmation | **Passed:** `qwen3.7-plus` read an 80 × 40 mm plate, 5 mm holes, 15 mm end offsets and square corners. Initial response asked for confirmation with no operations. Confirmed reconstruction was previewed and accepted with Keep it. | Local `outputs/dimensioned-sketch.png`; release live browser conversation check. |
+| Browser export files | **Passed:** accepted photo reconstruction exported to SVG/DXF with 80 × 40 mm outline, two 5 mm holes at 15 mm end offsets and three closed contours. SVG declares physical millimetres; DXF declares INSUNITS=4 and uses Y-up coordinates. DXF hole polylines use 24 vertices with radial approximation error below 0.025 mm. No photo payload or credentials found. | Read-only artifact check of local `outputs/browser-photo-plate.svg` and `outputs/browser-photo-plate.dxf`; this is not a laser-software roundtrip. |
+| Live butterfly recipe | **Passed:** deployed relay v22 returned one successful actual-client request in 6.9 seconds. Qwen selected the built-in butterfly recipe; a visible assumption identified the built-in outline. The expanded path has 30 editable points and actual 100 × 75 mm bounds. Rendered SVG visual review confirmed four wings and a body; preflight had no errors, only the expected estimated-profile warning. | Local `outputs/live-smoke-butterfly.json`, `outputs/live-smoke-butterfly.svg`, and visually reviewed `outputs/live-smoke-butterfly.png`. |
+| Arbitrary profile appearance | **Not certified:** general editable paths remain supported, but mathematical validity does not verify object recognition. An earlier raw-coordinate butterfly passed geometry checks yet failed visual review; standard named outlines now use explicit recipes. | Treat new arbitrary profiles as drafts requiring visual review. |
+| School laser software roundtrip | **Pending:** exported files have not been accepted in the school's actual laser software. | School-machine check required. |
+| Physical cut and measured fit | **Pending:** no physical cut or measured-fit acceptance claimed. | School-machine test piece required. |
+
+`outputs/` contains ignored local test artifacts and is deliberately excluded from the public repository. Do not interpret the local filenames above as files available from GitHub. Replace pending results only with the actual check outcome and evidence; keep unavailable checks visible.

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {askAssistant,localAssistant,checkConnection,DEFAULT_CONNECTION} from '../src/assistant.mjs';
-import {newDocument,createShape,applyOperations,shapeBounds} from '../src/geometry.mjs';
-import {validateTask,validateReply,providerConfiguration,providerMessages,callQwen,DEFAULT_BASE} from '../server/cad-system.mjs';
+import {newDocument,createShape,applyOperations,shapeBounds,preflight} from '../src/geometry.mjs';
+import {validateTask,validateReply,providerConfiguration,providerMessages,callQwen,DEFAULT_BASE,profileShape,PROFILE_RECIPES} from '../server/cad-system.mjs';
 
 const args=(question,extra={})=>({question,language:'en',document:newDocument(),...extra});
 const ok=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
@@ -56,6 +56,41 @@ test('response validator blocks incompatible mutations and unsafe fields',()=>{
   assert.throws(()=>validateReply(reply([{op:'add',shape:{type:'rect',width:Infinity}}])),/schema/);
   assert.throws(()=>validateReply(reply([{op:'add',shape:{type:'rect'}}]),{imageConfirmed:false}),/confirmation/);
 });
+test('misplaced path data cannot silently turn an AI silhouette into a default rectangle',()=>{
+  assert.throws(()=>validateReply(reply([{op:'add',shape:{type:'path',width:100,height:80,params:{points:[[0,0],[100,0],[50,80]],closed:true,smooth:false}}}])),/top_level/);
+  assert.throws(()=>validateReply(reply([{op:'add',shape:{type:'path',width:100,height:80,params:{}}}])),/top_level/);
+  const valid=validateReply(reply([{op:'add',shape:{type:'path',width:100,height:80,points:[[0,0],[100,0],[50,80]],closed:true,smooth:false,params:{}}}]));
+  assert.equal(applyOperations(newDocument(),valid.operations).shapes[0].points.length,3);
+});
+test('geometry fields and parameters are specific to the actual shape type',()=>{
+  for(const shape of [{type:'rect',params:{holes:[{diameter:5}]}},{type:'ellipse',params:{cornerRadius:2}},{type:'rect',points:[[0,0],[80,0],[40,40]]},{type:'gear',params:{holeDiameter:5}},{type:'text',text:'HELLO',points:[[0,0],[40,40]]}])assert.throws(()=>validateReply(reply([{op:'add',shape}])),/shape_type/);
+  const document=newDocument();document.shapes.push(createShape('ellipse',{id:'circle'}));
+  assert.throws(()=>validateReply(reply([{op:'update',id:'circle',changes:{params:{cornerRadius:2}}}]),{document}),/shape_type/);
+});
+test('estimated profile actual extents match declared size; specified internal dimensions cannot be stretched',()=>{
+  const shape={type:'path',x:20,y:30,width:100,height:80,provenance:'estimated',points:[[10,9],[110,9],[60,78]],closed:true,smooth:true,params:{}};
+  const result=validateReply(reply([{op:'add',shape}]));
+  const actual=applyOperations(newDocument(),result.operations).shapes[0],bounds=shapeBounds(actual);
+  assert.equal(bounds.x,20);assert.equal(bounds.y,30);assert.equal(bounds.width,100);assert.equal(bounds.height,80);
+  const exact={...shape,provenance:'specified',points:[[10,9],[110,9],[60,78]]};
+  assert.throws(()=>validateReply(reply([{op:'add',shape:exact}])),/must_match_declared/);
+});
+test('Qwen-selected profile recipes expand to bounded editable outlines with visible attribution',()=>{
+  for(const profile of Object.keys(PROFILE_RECIPES)) {
+    const result=validateReply(reply([{op:'add',shape:{type:'profile',profile,width:100,height:70,x:40,y:50}}]));
+    assert.match(result.assumptions.at(-1),/built-in editable/);
+    const doc=applyOperations(newDocument(),result.operations),shape=doc.shapes[0];
+    assert.equal(shape.type,'path');assert.equal(shape.closed,true);assert.equal(shape.provenance,'estimated');
+    const bounds=shapeBounds(shape);assert.equal(bounds.width,100);assert.equal(bounds.height,70);
+    assert.equal(preflight(doc).filter(i=>i.severity==='error').length,0,profile);
+  }
+  const zh=validateReply(reply([{op:'add',shape:{type:'profile',profile:'butterfly',width:100}}]),{language:'zh'});
+  assert.equal(zh.operations[0].shape.name,'蝴蝶');assert.match(zh.assumptions.at(-1),/内置/);
+  assert.throws(()=>profileShape('unknown'),/unknown_profile/);
+  assert.throws(()=>profileShape('butterfly',{params:{holes:[]}}),/params/);
+  assert.throws(()=>profileShape('butterfly',{points:[[0,0]]}),/unsupported/);
+  assert.throws(()=>validateReply(reply([{op:'add',shape:{type:'profile',profile:'butterfly',width:100}}]),{imageConfirmed:false}),/confirmation/);
+});
 test('initial photo confirmation is enforced independently from model output',async()=>{
   const task=validateTask({...args('read my sketch',{image}),history:[],selectedIds:[]});
   let calls=0;
@@ -86,10 +121,20 @@ test('browser repairs semantic geometry failure once against unchanged document'
   const doc=newDocument();let calls=0;
   const result=await askAssistant(args('rectangle 80 x 40',{document:doc}),{fetcher:async(_url,options)=>{
     calls++;const body=JSON.parse(options.body);
-    if(calls===2)assert.match(body.feedback,/rejected atomically/);
+    if(calls===2){assert.match(body.feedback,/rejected atomically/);assert.equal(body.history.at(-1).role,'assistant');assert.match(body.history.at(-1).content,/width/);}
     return ok(reply([{op:'add',shape:{type:'rect',width:calls===1?-20:80,height:40}}]));
   }});
   assert.equal(calls,2);assert.equal(result.operations[0].shape.width,80);assert.equal(doc.shapes.length,0);
+});
+test('path edits are checked against actual extents before dimensional claims are accepted',async()=>{
+  const doc=newDocument();doc.shapes.push(createShape('path',{id:'outline',width:40,height:30,points:[[0,0],[40,0],[20,30]]}));let calls=0;
+  const result=await askAssistant(args('make the profile wider',{document:doc}),{fetcher:async()=>{calls++;return ok(reply([{op:'update',id:'outline',changes:{points:[[0,0],[80,0],[40,30]],...(calls===2?{width:80}:{})}}]));}});
+  assert.equal(calls,2);assert.equal(result.operations[0].changes.width,80);assert.equal(doc.shapes[0].width,40);
+});
+test('AI cannot introduce an uncuttable self-intersecting outline',async()=>{
+  let calls=0;
+  await assert.rejects(askAssistant(args('a bow tie'),{fetcher:async()=>{calls++;return ok(reply([{op:'add',shape:{type:'path',width:40,height:30,points:[[0,0],[40,30],[0,30],[40,0]],closed:true,smooth:false,provenance:'estimated',params:{}}}]));}}),error=>error.code==='geometry');
+  assert.equal(calls,2);
 });
 test('browser fails closed after repeated invalid geometry and respects locks',async()=>{
   const doc=newDocument();doc.shapes.push(createShape('rect',{locked:true}));let calls=0;

@@ -114,6 +114,11 @@ function validateShape(input) {
   if (!s || typeof s !== 'object' || !TYPES.has(s.type)) fail('Unknown shape type.');
   if (typeof s.id !== 'string' || !s.id.length || s.id.length>150) fail('Shape ID must be a nonempty string of at most 150 characters.');
   if (typeof s.name !== 'string' || s.name.length > 300) fail('Shape name must be a string of at most 300 characters.');
+  // Grouping is selection metadata, never a geometry transform. Null supports
+  // explicit ungrouping through the same atomic update operation as any edit.
+  for(const [key,max] of [['groupId',150],['groupName',120]]) {
+    if(s[key]!=null && (typeof s[key]!=='string' || !s[key].trim() || s[key].length>max))fail(`${key} must be null or a nonempty string of at most ${max} characters.`);
+  }
   finite(s.x,'X'); finite(s.y,'Y'); finite(s.width,'Width',s.type==='line'?0:0.01,10000); finite(s.height,'Height',s.type==='line'?0:0.01,10000); finite(s.rotation,'Rotation',-360000,360000);
   if (!ROLES.has(s.role)) fail('Role must be cut, score, engrave, or reference.');
   if (!PROVENANCE.has(s.provenance)) fail('Provenance must be specified, estimated, or calculated.');
@@ -168,7 +173,13 @@ export function validateDocument(doc) {
   return result;
 }
 
-export function duplicateShape(shape) { return {...clone(shape),id:uid(),name:`${shape.name} copy`,x:shape.x+10,y:shape.y+10,locked:false}; }
+export function duplicateShape(shape) {
+  const copy={...clone(shape),id:uid(),name:`${shape.name} copy`,x:shape.x+10,y:shape.y+10,locked:false};
+  // A copied object must not unexpectedly join its source object's group.
+  // Multi-object UI duplication may explicitly assign a new shared group ID.
+  delete copy.groupId;delete copy.groupName;
+  return copy;
+}
 
 export function applyOperations(document, operations) {
   if(!Array.isArray(operations) || operations.length>60) fail('Provide at most 60 drawing operations.');
