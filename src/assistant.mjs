@@ -1,5 +1,7 @@
 import {createShape,applyOperations,validateDocument,shapeBounds,preflight} from './geometry.mjs';
-import {validateReply,validateTask,PROVIDER_BASES,DEFAULT_BASE,profileShape,PROFILE_RECIPES} from '../server/cad-system.mjs';
+import {validateReply,validateTask,validateVisualReview,isRecipeShape,PROVIDER_BASES,DEFAULT_BASE,profileShape,PROFILE_RECIPES} from '../server/cad-system.mjs';
+import {renderReviewImage} from './review-render.mjs';
+import {expandConstructiveReply} from './construction.mjs';
 
 export const DEFAULT_CONNECTION=Object.freeze({url:'https://bnta-robot-lab-connection.zhinii.chatgpt.site/api/cad'});
 const pick=(language,en,zh)=>language==='zh'?zh:en;
@@ -11,7 +13,11 @@ const errors={
   model:['This Qwen model is unavailable for the account. Check the connection settings.','当前账户无法使用此 Qwen 模型，请检查连接设置。'],
   vision_unavailable:['This connection could not read the photo. No photo measurements were accepted. Check the vision model or type the measurements.','此连接无法读取照片，尚未采纳照片尺寸。请检查视觉模型或输入尺寸。'],
   response:['Qwen returned a drawing that could not be validated. Nothing changed. Try a simpler description.','Qwen 返回的图纸未通过校验，未做任何更改。请尝试更简单的描述。'],
-  geometry:['The proposed geometry did not pass validation. Nothing changed. Please clarify the dimensions.','建议的几何图形未通过校验，未做任何更改。请明确尺寸。'],
+  geometry:['I could not produce a clean outline. Your drawing is unchanged. Review the issue below or try a different description.','未能生成清晰、无交叉的轮廓。图纸未改变。请查看下方问题或尝试另一种描述。'],
+  visual_review_failed:['I could not produce a recognizable outline after the visual checks. Your drawing is unchanged. Try a clearer view or provide a reference sketch.','经过视觉检查后，仍未生成可辨认的轮廓。图纸未改变。请明确视角或提供参考草图。'],
+  visual_review_unavailable:['The outline could not be visually checked. Your drawing is unchanged. Check the vision connection or try again.','无法完成轮廓的视觉检查。图纸未改变。请检查视觉模型连接或重试。'],
+  visual_renderer_unavailable:['The candidate outline could not be rendered for its visual check. Your drawing is unchanged.','无法渲染候选轮廓以进行视觉检查。图纸未改变。'],
+  timeout:['The AI drawing checks took too long. Your drawing is unchanged. Try again or simplify the requested outline.','AI 绘图检查用时过长。图纸未改变。请重试或简化所需轮廓。'],
   server_configuration:['The CAD connection is not configured yet. Manual drawing and built-in examples are available.','CAD 连接尚未配置，仍可手动绘图并使用内置示例。'],
   endpoint:['Use the school CAD connection or a local /api/cad endpoint. Keys can only go to the trusted bridge or localhost.','请使用学校 CAD 连接或本地 /api/cad 接口。密钥只能发送到可信连接桥或本机。'],
   image:['The photo must be JPEG or PNG, no more than 1024 pixels on either side and 450 KB after compression.','照片须为 JPEG 或 PNG，长边不超过 1024 像素，压缩后不超过 450 KB。'],
@@ -41,6 +47,11 @@ function endpoint(connection={}) {
 function combinedSignal(signal,ms) {
   return signal?AbortSignal.any([signal,AbortSignal.timeout(ms)]):AbortSignal.timeout(ms);
 }
+function validationDetail(language,phase,error) {
+  // Only fixed validator identifiers are exposed, never request/image contents.
+  const reason=/^[a-z_]{1,160}$/.test(error?.message||'')?error.message:'invalid_response';
+  return pick(language,`CAD ${phase} validation: ${reason}.`,`CAD ${phase} 校验：${reason}。`);
+}
 export async function checkConnection(connection=DEFAULT_CONNECTION,signal,fetcher=globalThis.fetch) {
   if(connection.mode==='offline'||connection.offline)return {configured:false,verified:false,service:'Built-in examples',source:'offline'};
   const config=endpoint(connection);
@@ -50,8 +61,9 @@ export async function checkConnection(connection=DEFAULT_CONNECTION,signal,fetch
   // Health is deliberately free: the provider checks account/key access on the first prompt.
   return {configured:data.configured||Boolean(connection.key),verified:false,service:data.service,model:connection.key&&connection.model?connection.model:typeof data.model==='string'?data.model:undefined,visionModel:typeof data.visionModel==='string'?data.visionModel:undefined,sessionKey:Boolean(connection.key),source:'qwen'};
 }
-export async function askAssistant(args, {fetcher=globalThis.fetch}={}) {
+export async function askAssistant(args, {fetcher=globalThis.fetch,renderer=renderReviewImage,onProgress=args.onProgress}={}) {
   const {question,language='en',document,selectedIds=[],history=[],image,connection=DEFAULT_CONNECTION,signal}=args;
+  const dimensioned=args.workflow==='dimensioned';
   if(signal?.aborted)throw assistantError('cancelled',language);
   if(connection.mode==='offline'||connection.offline) {
     const result=localAssistant(args);
@@ -62,41 +74,133 @@ export async function askAssistant(args, {fetcher=globalThis.fetch}={}) {
   try {
     config=endpoint(connection);
     const doc=validateDocument(document);
-    task=validateTask({question,language,document:doc,selectedIds,history:history.slice(-10).filter(m=>['user','assistant'].includes(m.role)).map(m=>({role:m.role,content:String(m.content??m.reply??'').slice(0,4000)})),...(image?{image}:{})});
+    const focusedQuestion=dimensioned?`Dimensioned drawing prototype: one flat part, one orthographic view, millimetres. Use written or user-confirmed dimensions, never pixel estimates. Ask for missing or conflicting measurements. Supported shapes: plate, rect, circular ellipse, straight path, line. No construct, gear, artistic profiles or tracing of dimension arrows/text. Prefer a plate for two equal holes centred vertically and equally inset from each end; explicitly set cornerRadius (0 for square corners). Preserve hole diameter and edgeInset when changing plate width. For other outlines explain any positions not constrained. User request: ${question}`:question;
+    task=validateTask({question:focusedQuestion,language,document:doc,selectedIds,history:history.slice(-10).filter(m=>['user','assistant'].includes(m.role)).map(m=>({role:m.role,content:String(m.content??m.reply??'').slice(0,4000)})),...(image?{image}:{})});
   } catch(error) { throw assistantError(errors[error.message]?error.message:'geometry',language); }
-  const requestSignal=combinedSignal(signal,70000);
-  for(let attempt=0;attempt<2;attempt++) {
-    let data;
+  const requestSignal=combinedSignal(signal,180000),reviews=[];
+  let geometryRepairs=0,revision=0,requestCount=0;
+  const timedOut=()=>{const error=assistantError('timeout',language),last=reviews.at(-1);if(last){error.detail=[last.summary,...last.issues].join(' ').slice(0,1400);error.visualReview=last;}return error;};
+  const ensureActive=()=>{if(requestSignal.aborted)throw signal?.aborted?assistantError('cancelled',language):timedOut();};
+  const progress=(phase,critique)=>{ensureActive();try{onProgress?.({phase,attempt:revision+1,maxAttempts:3,...(critique?{critique}:{})});}catch(error){if(requestSignal.aborted)ensureActive();}};
+  const request=async body=>{
+    ensureActive();if(++requestCount>7)throw assistantError('visual_review_failed',language);
+    const callSignal=combinedSignal(requestSignal,65000);
     try {
-      const response=await fetcher(config.url,{method:'POST',redirect:'error',headers:config.headers,body:JSON.stringify(task),signal:requestSignal});
-      try{data=await response.json();}catch{throw assistantError('response',language);}
-      if(!response.ok)throw assistantError(typeof data?.error==='string'?data.error:'connection',language);
+      let checked;
+      try{checked=validateTask(body);}catch(error){const failure=assistantError('response',language);failure.detail=validationDetail(language,body.phase||'draft',error);throw failure;}
+      const serialized=JSON.stringify(checked);
+      if(new TextEncoder().encode(serialized).length>900000)throw assistantError('document_size',language);
+      const response=await fetcher(config.url,{method:'POST',redirect:'error',headers:config.headers,body:serialized,signal:callSignal});
+      let data;try{data=await response.json();}catch{const failure=assistantError('response',language);failure.detail=pick(language,`The CAD relay returned unreadable JSON (${body.phase}, HTTP ${response.status}).`,`CAD 连接返回了无法读取的 JSON（${body.phase}，HTTP ${response.status}）。`);throw failure;}
+      ensureActive();
+      if(!response.ok){
+        const code=typeof data?.error==='string'&&/^[a-z_]{1,80}$/.test(data.error)?data.error:'connection',failure=assistantError(code,language);
+        const reason=typeof data?.reason==='string'&&/^[a-z_]{1,160}$/.test(data.reason)?data.reason:undefined;
+        failure.detail=pick(language,`CAD relay ${body.phase} failed (HTTP ${response.status}, ${code}${reason?`; ${reason}`:''}).`,`CAD 连接 ${body.phase} 失败（HTTP ${response.status}，${code}${reason?`；${reason}`:''}）。`);
+        throw failure;
+      }
+      return data;
     } catch(error) {
       if(signal?.aborted)throw assistantError('cancelled',language);
+      if(callSignal.aborted||error.name==='TimeoutError')throw timedOut();
       if(error.code)throw error;
       throw assistantError('connection',language);
     }
+  };
+  for(;;) {
+    progress(revision?'revising':'drafting',task.candidate?.critique?.summary);
+    const data=await request(task);
+    let result,preview,newShapes,geometryIssue,sourceOperations;
     try {
-      const result=validateReply(data,{imageConfirmed:!image||image.confirmed===true,document,language});
+      const proposed=validateReply(data,{imageConfirmed:!image||image.confirmed===true,document,language});
+      sourceOperations=proposed.operations;
+      result=expandConstructiveReply(proposed,document);
       // Atomic validation uses the same model as mouse editing and fabrication export.
-      const preview=applyOperations(document,result.operations),beforeIds=new Set(document.shapes.map(s=>s.id)),updatedIds=new Set(result.operations.filter(o=>o.op==='update').map(o=>o.id));
+      preview=applyOperations(document,result.operations);
+      const beforeIds=new Set(document.shapes.map(s=>s.id)),updatedIds=new Set(result.operations.filter(o=>o.op==='update').map(o=>o.id));
+      newShapes=preview.shapes.filter(s=>!beforeIds.has(s.id)||updatedIds.has(s.id)&&(outlineChanged(document.shapes.find(old=>old.id===s.id),s)||sourceOperations.some(op=>op.op==='construct'&&op.targetId===s.id)));
+      if(dimensioned&&(sourceOperations.some(op=>op.op==='construct')||newShapes.some(s=>!['plate','rect','ellipse','path','line'].includes(s.type)||s.smooth||s.provenance==='estimated')))throw new Error('This prototype needs confirmed measurements and simple straight outlines or circles. Please clarify the missing measurements.');
       for(const shape of preview.shapes)if(shape.type==='path'&&(!beforeIds.has(shape.id)||updatedIds.has(shape.id))) {
         const bounds=shapeBounds({...shape,x:0,y:0,rotation:0});
         if(Math.max(Math.abs(bounds.x),Math.abs(bounds.y),Math.abs(bounds.width-shape.width),Math.abs(bounds.height-shape.height))>1e-5)throw new Error('Path points do not match the declared outside dimensions. Set points to start at local 0,0 and span exactly width and height.');
       }
-      const introducedError=preflight(preview).find(issue=>issue.severity==='error'&&issue.shapeId&&(!beforeIds.has(issue.shapeId)||updatedIds.has(issue.shapeId)));
-      if(introducedError)throw new Error(introducedError.message);
-      if(requestSignal.aborted)throw assistantError(signal?.aborted?'cancelled':'connection',language);
-      return {...result,source:'qwen',...(data.perception?{perception:data.perception}:{})};
+      geometryIssue=result.constructionIssues?.find(issue=>issue.severity==='error')||preflight(preview).find(issue=>issue.severity==='error'&&issue.shapeId&&(!beforeIds.has(issue.shapeId)||updatedIds.has(issue.shapeId)));
+      // Finite, schema-valid paths can still cross themselves. Render these
+      // drafts for image-guided correction instead of exhausting text repairs
+      // before the visual model ever sees what it drew. They cannot be accepted.
+      if(geometryIssue)geometryIssue={...geometryIssue,detail:geometryIssue.message};
+      ensureActive();
     } catch(error) {
       if(error.code)throw error;
-      if(attempt===0){
+      if(!dimensioned&&geometryRepairs++===0){
         task.history=[...task.history.slice(-9),{role:'assistant',content:JSON.stringify(data).slice(0,4000)}];
-        task.feedback=`Previous proposal rejected atomically: ${String(error.message).slice(0,500)}. No changes applied. Correct it using the CURRENT document. For crossing outlines, walk once around a single simple boundary; never repeat or touch an internal vertex. Use an available profile recipe for a standard butterfly, heart, tree or fish. Return a question with no operations if dimensions remain unresolved.`;continue;
+        task.feedback=`Previous proposal rejected atomically: ${String(error.message).slice(0,500)}. No changes applied. Correct it using the CURRENT document. For ordinary objects prefer construct with overlapping local primitives rather than a long perimeter. Repair invalid dimensions/fields without inventing measurements. Return a question with no operations if fit-critical dimensions remain unresolved.`;continue;
       }
       const failure=assistantError('geometry',language);failure.detail=String(error.message).slice(0,800);throw failure;
     }
+    const hasConstruction=sourceOperations.some(op=>op.op==='construct');
+    if(dimensioned){
+      if(geometryIssue){const error=assistantError('geometry',language);error.detail=geometryIssue.detail;throw error;}
+      return {...result,source:'qwen',...(data.perception?{perception:data.perception}:{}),requestCount};
+    }
+    const needsReview=hasConstruction||!!geometryIssue||newShapes.length>0&&!isSimpleGeometryRequest(question,newShapes)&&!(!image&&newShapes.every(s=>canSkipRecipeReview(s,question)))||reviews.length>0;
+    if(!needsReview||result.needsInput) return {...result,source:'qwen',...(data.perception?{perception:data.perception}:{}),...(reviews.length?{visualReview:{status:'unresolved',attempts:reviews.length,reviews}}:{})};
+    if(!newShapes.length)throw visualFailure(reviews.at(-1),language);
+    progress('reviewing');
+    let rendered;
+    try{rendered=await renderer({document:preview,shapes:newShapes,signal:combinedSignal(requestSignal,12000)});ensureActive();}
+    catch(error){if(signal?.aborted)throw assistantError('cancelled',language);if(requestSignal.aborted||error.name==='TimeoutError')throw timedOut();throw assistantError('visual_renderer_unavailable',language);}
+    // Preserve the small construction plan in vision/revision context. Only its
+    // expanded path reaches the editor; flattened contours can exceed the AI's
+    // raw-point cap and must not replace the usable component plan here.
+    const candidate={image:rendered,operations:sourceOperations,revision,measurements:newShapes.map(s=>{const b=shapeBounds(s);return {name:s.name,width:b.width,height:b.height,provenance:s.provenance};})};
+    let review;
+    try{const assessed=await request({...task,phase:'review',candidate,...(geometryIssue?{feedback:`Geometry check failed: ${geometryIssue.detail}. The rendered draft is provisional and cannot be accepted until this is repaired. Also assess its actual resemblance to the requested object.`}:{})});
+      try{review=validateVisualReview(assessed.review);}catch(error){const failure=assistantError('response',language);failure.detail=validationDetail(language,'review',error);throw failure;}
+    }
+    catch(error){if(['cancelled','timeout','auth','quota','rate_limit'].includes(error.code))throw error;const failure=assistantError('visual_review_unavailable',language);if(error.detail)failure.detail=error.detail;if(reviews.length)failure.visualReview=reviews.at(-1);throw failure;}
+    if(geometryIssue)review={...review,verdict:'revise',summary:review.summary,issues:[geometryIssue.detail,...review.issues].slice(0,6)};
+    reviews.push(review);ensureActive();
+    if(review.verdict==='pass') {
+      const notice=pick(language,'AI visual check passed. Review the preview yourself; this does not verify physical dimensions, fit or safety.','AI 视觉检查通过。请自行检查预览；这不代表实物尺寸、配合或安全性已验证。');
+      const constructionNotice=pick(language,'Built by combining local shapes. The requested outside dimensions are exact; internal proportions are estimated.','通过组合局部图形构建。要求的外部尺寸精确；内部比例为估计值。');
+      return {...result,source:'qwen',assumptions:[...result.assumptions,...(hasConstruction?[constructionNotice]:[]),notice],visualReview:{status:'passed',attempts:reviews.length,summary:review.summary,recognizedObject:review.recognizedObject,reviews},...(data.perception?{perception:data.perception}:{})};
+    }
+    if(revision>=2){const failure=visualFailure(review,language);if(geometryIssue){failure.code='geometry';failure.message=assistantError('geometry',language).message;}throw failure;}
+    revision++;
+    task={...task,phase:'revise',candidate:{...candidate,revision,critique:review},feedback:`The actual rendered candidate failed visual review: ${review.summary} ${review.issues.join(' ')}. Original drawing is unchanged. Inspect the candidate image and replace the whole proposal with a recognizable outline preserving all user-specified measurements.`};
   }
+}
+
+function visualFailure(review,language) {
+  const error=assistantError('visual_review_failed',language);
+  error.detail=review?[review.summary,...review.issues].join(' ').slice(0,1400):'';
+  error.visualReview=review;return error;
+}
+export function canSkipRecipeReview(shape,question) {
+  if(!isRecipeShape(shape))return false;
+  const words=String(question).toLowerCase().replace(/[0-9.,×-]+/g,' ').match(/[\p{L}]+/gu)||[];
+  const allowed=new Set(['a','an','the','make','draw','create','add','please','me','silhouette','outline','profile','path','wide','width','high','height','tall','mm','millimetres','millimeters','cm','centimeters','by','x','closed','editable','single','use','built','in','choose','its',shape.recipe]);
+  // Contextual/custom/multi-object requests are reviewed even when a recipe is
+  // valid; e.g. a butterfly relabelled Dog cannot bypass the identity check.
+  return words.includes(shape.recipe)&&words.every(word=>allowed.has(word));
+}
+function outlineChanged(before,after) {
+  if(before?.type!=='path'||after.type!=='path')return false;
+  const signature=s=>JSON.stringify({closed:s.closed,smooth:s.smooth,contours:(s.contours||[s.points]).map(c=>c.map(([x,y])=>[+(x/s.width).toFixed(8),+(y/s.height).toFixed(8)]))});
+  return signature(before)!==signature(after);
+}
+function isSimpleGeometryRequest(question,shapes) {
+  const text=String(question).toLowerCase();
+  if(shapes.some(s=>s.type==='path'))return false;
+  const tokens=text.replace(/[0-9.,×-]+/g,' ').match(/[\p{L}]+/gu)||[];
+  const names=['rectangle','rect','square','circle','ellipse','line','text','lettering','plate','gear'];
+  const allowed=new Set([...names,'a','an','the','make','draw','create','add','please','me','width','wide','height','high','tall','long','length','diameter','radius','with','without','rounded','round','corners','corner','mm','cm','millimetres','millimeters','inches','inch','in','by','x','of','to','and','is','no','horizontal','vertical','diagonal','horizontally','vertically','rectangular','mounting','spur','involute','module','teeth','tooth','bore','pressure','angle','degree','degrees','hole','holes','centre','center','centreline','centerline','centred','centered','each','its','their','nearest','from','end','ends','offset','offsets','two','one','on','square','educational','example']);
+  if(tokens.some(w=>names.includes(w))&&tokens.every(w=>allowed.has(w)))return true;
+  // Chinese primitive requests: strip only known dimension/command words. Any
+  // remaining object name forces visual review rather than trusting its label.
+  if(/长方形|矩形|正方形|圆形|椭圆|直线|安装板|板件|齿轮/.test(text))return !text.replace(/长方形|矩形|正方形|圆形|椭圆|直线|安装板|板件|齿轮|毫米|厘米|英寸|不要|圆角|直角|垂直|水平|孔径|边距|模数|压力角|内孔|中心|两个|两端|距|齿|孔|度|宽|高|长|直径|半径|请|画|绘制|一个|一条|的|为|有|\d|[\s.,，。×x：:、-]/g,'');
+  return false;
 }
 
 const number='([0-9]+(?:\\.[0-9]+)?)';

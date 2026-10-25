@@ -1,4 +1,5 @@
-// Deploy with cad-system.mjs in app/api/cad/. Uses the existing relay's Alibaba secrets.
+// Deploy with cad-system.mjs and construction-schema.mjs in app/api/cad/.
+// Uses the existing relay's Alibaba secrets; no geometry dependency is needed.
 import { MAX_BODY_BYTES, validateTask, providerConfiguration, callQwen, CadError } from './cad-system.mjs';
 
 const allowedOrigins = new Set(['https://zhinii.github.io', 'http://127.0.0.1:4227', 'http://localhost:4227', 'http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:4248', 'http://localhost:4248']);
@@ -42,7 +43,7 @@ export async function POST(request:Request) {
     stage='provider';
     return reply(await callQwen(task,config,{signal}));
   } catch(error) {
-    if(error instanceof CadError)return reply({error:error.code},error.status);
+    if(error instanceof CadError)return reply({error:error.code,...(error.reason?{reason:error.reason}:{})},error.status);
     return reply({error:request.signal.aborted?'cancelled':'connection',stage,kind:error instanceof TypeError?'type':error instanceof SyntaxError?'json':'transport'},502);
   } finally { if(admitted)inFlight--; }
 }

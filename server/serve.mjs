@@ -53,7 +53,7 @@ export function createCadServer({config=null,staticRoot=join(root,'dist'),port=4
         clients.set(ip,count+1);total++;inFlight++;admitted=true;
         const result=await callQwen(task,requestConfig,{fetcher,signal:AbortSignal.any([controller.signal,AbortSignal.timeout(55000)])});
         return send(200,result);
-      } catch(error) { return send(error instanceof CadError?error.status:502,{error:error instanceof CadError?error.code:controller.signal.aborted?'cancelled':'connection'}); }
+      } catch(error) { return send(error instanceof CadError?error.status:502,{error:error instanceof CadError?error.code:controller.signal.aborted?'cancelled':'connection',...(error instanceof CadError&&error.reason?{reason:error.reason}:{})}); }
       finally { if(admitted)inFlight--; }
     }
     if(!['GET','HEAD'].includes(req.method))return send(405,{error:'method'});

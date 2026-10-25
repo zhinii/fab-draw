@@ -8,24 +8,27 @@ The drawing is stored as geometry in millimetres. Qwen interprets the request an
 
 ## Try it
 
-1. Open the app and describe a part: **“Make an 80 by 40 mm mounting plate with two 5 mm holes, centred vertically, each 15 mm from its nearest end.”** Review the preview, then choose **Keep it**.
-2. Click the part to enter dimensions, drag it, rotate it, copy it or edit its points. You can also ask **“Make the selected plate 100 mm wide, keeping the holes and end offsets unchanged.”**
-3. Upload a dimensioned sketch and ask **“Read this sketch and list the dimensions for me to confirm.”** Verify the readings before confirming reconstruction.
-4. Save an editable project, or export SVG/DXF for the school's laser software. Check the imported size before cutting.
+1. Choose **Photo** and upload a clear dimensioned image of one flat part. Send the prefilled request to read its measurements. Check the readings in the conversation, then choose **Confirm readings** and **Send**.
+2. Review the reconstructed preview and choose **Keep it**. For the plate example, check 80 × 40 mm, two Ø5 holes, 15 mm end offsets, square corners and vertically centred holes.
+3. Ask **“Make the plate 100 mm wide, keeping the holes and end offsets unchanged.”** Keep the preview. The right hole moves to 85 mm from the left edge; the left hole remains at 15 mm.
+4. Toggle **Dimensions** to show the separate annotation layer. Click an editable dimension label to change its value without an AI call. Move, rotate, copy or edit points with the existing tools.
+5. Save an editable project, or export SVG/DXF. Leave **Include dimension layer** unchecked for laser geometry. Check it for a dimensioned reference drawing. In Fab Draw the dimensions update with edits; exports contain a static annotation snapshot.
 
 For a conversation that starts with questions, try **“Make a bracket for my motor.”** For Chinese, select **中文** and try **“画一个80×40毫米的矩形。”**
 
 ## First release
 
-- Tool cards at the top, a large canvas, object cards and an always-visible conversation at the bottom, with English and Chinese interface choices.
+- A compact top toolbar with Draw, Shapes and More menus, a full dark drawing grid, object/group cards and an always-visible conversation at the bottom. English and Chinese remain available.
 - Manual shapes and paths, editable dimensions, selection, movement, rotation, copying, scaling and point editing.
 - Millimetre project geometry, operation roles for cut, score, engrave and reference, undo/redo, browser recovery and editable project files.
-- A Qwen connection for language and image requests, plus a small local command assistant for supported requests when AI is unavailable.
-- Standard butterfly, heart, tree and fish outlines use Qwen-selected, deterministic profile recipes. A visible note identifies the built-in starting outline; the resulting path and points remain editable.
+- A Qwen connection for language and image requests, plus an optional offline command mode for supported simple requests. Choose offline mode in More → Connection.
+- The current chat workflow focuses on measured plates, rectangles, circles and straight outlines. Artistic profiles and the experimental construction/visual-review loop are outside this prototype's active chat workflow.
+- One relay request per user chat action, with local geometry validation and no automatic visual-review or repair loop. The relay may retry a malformed provider JSON response once. Missing measurements should prompt a question instead of an estimate.
+- Separate generated dimensions for overall sizes, circle diameters, and plate hole diameters/end offsets/centre height. Plate parameters preserve hole relationships when the width changes; arbitrary paths do not have a general constraint solver.
 - Photo-assisted interpretation of sketches. The assistant can ask for missing dimensions; an undimensioned photograph does not establish an accurate physical scale.
 - SVG and DXF exports, with basic geometry checks before export.
 
-This is a first release for simple 2D parts, outlines, signs and sketches. It is not a complete mechanical constraint solver, garment pattern system, assembly simulator or machine controller. Gears, mounting plates and standard profile recipes are generated deterministically from parameters. Other objects can use arbitrary editable paths, but those need visual review: valid geometry alone does not prove that an outline resembles the intended object or that mating parts will work.
+This prototype starts with clear, single-view dimensioned images in millimetres. PDF import, complex assemblies, perspective correction and automatic dimensioning of every internal feature are deferred. Manual tools and offline examples remain available. Review the AI's readings and proposed geometry before choosing Keep it.
 
 ## Run locally
 
@@ -51,6 +54,8 @@ npm run preview
 The connection follows Robot Lab's server-side relay pattern and can use the same Qwen account and model endpoint. A CAD request needs the CAD-specific route and system prompt; the robot simulator's motion endpoint cannot interpret drawing operations.
 
 The frontend sends the current drawing, selected object IDs, recent conversation and an attached image when supplied. The relay returns a reply and a bounded set of geometry operations. Invalid operations must leave the original drawing intact.
+
+For a general object or a changed freeform outline, the browser renders a cropped, unlabelled image of the actual proposed geometry. The vision model describes the visible form and compares it with the request. Revisions receive that rendering and specific criticism, using the vision model too. The result retains the review assessment; a failed or uncertain final review cannot be accepted as a finished shape. Explicit simple geometry and verified matching built-in recipes can skip this check. Sketch measurement confirmation is a separate step and cannot be bypassed by a review image.
 
 Keep the Qwen API key on the relay server, outside the repository. Never place a key in frontend source, a public environment variable, an exported project, a URL or a screenshot. If using the optional session-key connection, the key is held in memory for that browser session and sent only to the configured trusted bridge; it is not saved with the project or browser recovery.
 
@@ -94,6 +99,8 @@ Digital dimensions and physical fit are different. Material thickness, kerf, too
 
 Click a shape to select it and use its dimensions to make a precise edit. Use direct manipulation for visual adjustments and the conversation for a named object or selected part. Undo/redo should cover both manual edits and accepted AI operations.
 
+The grid fills the workspace; a subtle outline marks the material sheet used for export checks. Open the top menus for drawing and editing tools. Pan mode and the zoom/fit controls also work without a mouse wheel. The object cards above the conversation let you select individual pieces or saved groups.
+
 Download an editable project for a durable copy. Browser recovery is local to that browser and device and can be cleared or evicted. There are no school accounts, collaborative sessions or server project backups in this release.
 
 ## Laser exports
@@ -104,7 +111,7 @@ Reference objects are excluded from manufacturing exports. Check that intended c
 
 Photo attachments are interpretation references; they are not raster engraving output. The vector text tool produces single-line lettering for engraving or scoring. It supports Latin letters, digits and basic punctuation, maps lowercase letters to uppercase and rejects unsupported characters. It does not produce Chinese lettering, filled font outlines or stencil bridges.
 
-SVG retains supported arcs and smooth curves. Smooth paths use bounded cubic interpolation through their editable points; arbitrary Bézier control handles are not exposed. DXF uses polylines with a target curve-flattening tolerance of 0.025 mm and CAD Y-up coordinates; its header declares millimetres. Boolean operations also flatten curves and record a 0.05 mm combined tolerance. Generated involute gears have no backlash or root fillet; low tooth counts can require undercut/profile-shift engineering. Test paired gears and material before using them in a loaded mechanism.
+SVG retains supported arcs and smooth curves. Smooth paths use bounded cubic interpolation through their editable points; arbitrary Bézier control handles are not exposed. DXF uses polylines with a target curve-flattening tolerance of 0.025 mm and CAD Y-up coordinates; its header declares millimetres. Boolean operations also flatten curves and record a 0.05 mm combined tolerance. Construction produces polygon contours; normalizing their outside size can enlarge the approximation, and their stored tolerance includes that scaling. Generated involute gears have no backlash or root fillet; low tooth counts can require undercut/profile-shift engineering. Test paired gears and material before using them in a loaded mechanism.
 
 ## Verification
 
@@ -112,13 +119,16 @@ The automated tests cover core geometry and assistant/server boundaries. The man
 
 `node scripts/live-smoke.mjs` checks relay health without a model request; explicit `butterfly`, `plate`, `zh` or `photo` arguments make live Qwen requests. The `photo` case requires a local 900 × 600 PNG at `outputs/dimensioned-sketch.png`; this fixture and generated evidence are intentionally excluded from Git.
 
-On 2026-10-24, 63 automated tests and the production build passed; the dependency audit reported zero vulnerabilities. Live Qwen checks covered an exact mounting plate, Chinese rectangle, technical clarification, confirmed reconstruction of a dimensioned sketch and a visually reviewed butterfly recipe with an actual 100 × 75 mm outline and visible built-in attribution. Browser-exported SVG/DXF geometry was independently checked for dimensions, holes, units and excluded photo/credential data. Before the layout rewrite, browser checks covered dimensioned editing, rotated compound-point editing, persistence, tablet/390-pixel phone widths and explicit acknowledgement before accepting proposed deletions. The new top-tool/bottom-conversation layout still needs its final browser recheck. Roundtrips through the school's actual laser software and physical cutting remain pending.
+On 2026-10-24, 84 automated tests passed; the production build passed before the latest outline-repair refinement. The dependency audit reported zero vulnerabilities. The tests include visual rejection/revision, cancellation, existing-outline changes, request limits, photo-confirmation separation and specific crossing-segment diagnostics. Earlier live Qwen checks covered an exact mounting plate, Chinese rectangle, technical clarification, confirmed reconstruction of a dimensioned sketch and a visually reviewed butterfly recipe with an actual 100 × 75 mm outline and visible built-in attribution. Browser-exported SVG/DXF geometry was independently checked for dimensions, holes, units and excluded photo/credential data. The new automatic visual-review loop still needs its separate live browser acceptance; earlier recipe and sketch results do not establish that it works. Current layout checks are recorded in the acceptance plan. Roundtrips through the school's actual laser software and physical cutting remain pending.
 
 ## Project structure
 
 - `src/main.mjs` and `src/style.css`: browser interface and interaction.
 - `src/geometry.mjs`: document validation, geometry operations, generated parts, preflight and export.
 - `src/assistant.mjs`: conversation client and supported local commands.
+- `src/construction.mjs`: component-plan expansion into editable outline geometry.
+- `src/review-render.mjs`: actual-geometry raster rendering for visual checks.
+- `server/construction-schema.mjs`: shared bounded construction schema.
 - `server/`: Qwen relay and static serving support.
 - `tests/`: automated checks and manual acceptance plan.
 

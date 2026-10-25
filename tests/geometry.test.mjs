@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newDocument,createShape,validateDocument,applyOperations,shapePath,shapeTransform,shapeBounds,documentBounds,exportSVG,exportDXF,preflight,duplicateShape,booleanShapes,getShapePoints,normalizePathBounds} from '../src/geometry.mjs';
+import {newDocument,createShape,validateDocument,applyOperations,shapePath,shapeTransform,shapeBounds,documentBounds,exportSVG,exportDXF,preflight,duplicateShape,booleanShapes,getShapePoints,normalizePathBounds,firstPathIntersection} from '../src/geometry.mjs';
 
 const near=(actual,expected,tolerance=1e-6)=>assert.ok(Math.abs(actual-expected)<=tolerance,`${actual} should equal ${expected} ± ${tolerance}`);
 const withShapes=(...shapes)=>({...newDocument(),shapes});
@@ -299,6 +299,31 @@ test('self-touching and zero-area closed cuts are identified as invalid geometry
   assert.ok(preflight(withShapes(touching)).some(i=>i.code==='self-intersection'));
   const collapsed=createShape('path',{points:[[0,0],[10,0],[20,0]],closed:true});
   assert.ok(preflight(withShapes(collapsed)).some(i=>i.code==='degenerate-contour'&&i.severity==='error'));
+});
+
+test('intersection diagnostics name original straight edges and local coordinates without moving geometry',()=>{
+  const s=createShape('path',{x:70,y:90,width:40,height:40,rotation:37,points:[[0,0],[40,40],[0,40],[40,0]],closed:true,smooth:false});
+  const before=structuredClone(s),crossing=firstPathIntersection(s);
+  assert.deepEqual(crossing,{contourA:0,segmentA:[0,1],contourB:0,segmentB:[2,3],point:[20,20],kind:'cross'});
+  assert.deepEqual(s,before);
+  const issue=preflight(withShapes(s)).find(i=>i.code==='self-intersection');
+  assert.equal(issue.severity,'error');assert.match(issue.message,/edge 0→1.*edge 2→3.*local \(20, 20\)/);
+});
+
+test('smooth intersection diagnostics map flattened curves back to their original anchor edges',()=>{
+  const s=createShape('path',{width:50,height:40,points:[[0,0],[40,40],[50,40],[0,40],[40,0],[50,0]],closed:true,smooth:true});
+  const crossing=firstPathIntersection(s);
+  assert.deepEqual(crossing.segmentA,[0,1]);assert.deepEqual(crossing.segmentB,[3,4]);
+  near(crossing.point[0],16.875,0.025);near(crossing.point[1],20,0.025);
+  assert.ok(Math.abs(crossing.point[0]-20)>3,'diagnostic follows the curve, not its straight anchor chord');
+  assert.equal(firstPathIntersection(createShape('path',{points:[[0,0],[50,0],[50,50],[0,50]],smooth:true})),null);
+});
+
+test('intersection diagnostics retain separate contour identities and detect touches',()=>{
+  const s=createShape('path',{width:40,height:40,points:[[0,0],[40,0],[40,40],[0,40]],contours:[[[0,0],[40,0],[40,40],[0,40]],[[20,0],[25,10],[15,10]]],closed:true});
+  const crossing=firstPathIntersection(s);
+  assert.equal(crossing.contourA,0);assert.equal(crossing.contourB,1);assert.equal(crossing.kind,'touch');
+  near(crossing.point[0],20);near(crossing.point[1],0);
 });
 
 test('document bounds omit reference geometry by default',()=>{

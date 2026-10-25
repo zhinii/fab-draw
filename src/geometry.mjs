@@ -392,6 +392,43 @@ function crosses(a,b,c,d) {
   const on=(p,u,v)=>p[0]>=Math.min(u[0],v[0])-EPS&&p[0]<=Math.max(u[0],v[0])+EPS&&p[1]>=Math.min(u[1],v[1])-EPS&&p[1]<=Math.max(u[1],v[1])+EPS;
   return Math.abs(abC)<EPS&&on(c,a,b)||Math.abs(abD)<EPS&&on(d,a,b)||Math.abs(cdA)<EPS&&on(a,c,d)||Math.abs(cdB)<EPS&&on(b,c,d);
 }
+// Diagnostic only: original anchor indices survive subdivision, so repair
+// feedback identifies editable edges instead of opaque flattened segment IDs.
+// It uses the same curves/tolerance as preflight and never changes acceptance.
+export function firstPathIntersection(input) {
+  const s=validateShape(input);if(s.type!=='path')return null;
+  const segments=[];
+  for(const [contour,source]of (s.contours||[s.points]).entries()) {
+    const points=s.closed?openRing(source):source,parts=[];
+    if(s.smooth)for(const [edge,cubic]of bezierSegments(points,s.closed).entries()) {
+      const flat=[cubic[0]];flattenCubic(cubic,flat);
+      for(let i=0;i<flat.length-1;i++)parts.push({a:flat[i],b:flat[i+1],edge});
+    }
+    else for(let edge=0;edge<(s.closed?points.length:points.length-1);edge++)parts.push({a:points[edge],b:points[(edge+1)%points.length],edge});
+    parts.forEach((part,index)=>segments.push({...part,contour,index,count:parts.length,from:part.edge,to:(part.edge+1)%points.length,start:points[part.edge],end:points[(part.edge+1)%points.length]}));
+  }
+  let checks=0;
+  for(let i=0;i<segments.length;i++)for(let j=i+1;j<segments.length;j++) {
+    const a=segments[i],b=segments[j];
+    if(a.contour===b.contour&&(Math.abs(a.index-b.index)<=1||s.closed&&a.index===0&&b.index===a.count-1))continue;
+    if(same(a.a,a.b)||same(b.a,b.b))continue;
+    if(++checks>500000)return null;
+    if(!crosses(a.a,a.b,b.a,b.b))continue;
+    const dx=a.b[0]-a.a[0],dy=a.b[1]-a.a[1],ex=b.b[0]-b.a[0],ey=b.b[1]-b.a[1],den=dx*ey-dy*ex;
+    let point,kind;
+    if(Math.abs(den)>EPS) {
+      const t=((b.a[0]-a.a[0])*ey-(b.a[1]-a.a[1])*ex)/den;
+      const u=((b.a[0]-a.a[0])*dy-(b.a[1]-a.a[1])*dx)/den;
+      point=[a.a[0]+t*dx,a.a[1]+t*dy];kind=[a.start,a.end,b.start,b.end].some(p=>same(p,point))?'touch':'cross';
+    } else {
+      const shared=[a.a,a.b,b.a,b.b].filter(p=>distanceLine(p,a.a,a.b)<EPS&&distanceLine(p,b.a,b.b)<EPS);
+      point=shared[0];if(!point)continue;
+      kind=shared.some(p=>!same(p,point))?'overlap':'touch';
+    }
+    return {contourA:a.contour,segmentA:[a.from,a.to],contourB:b.contour,segmentB:[b.from,b.to],point:[...point],kind};
+  }
+  return null;
+}
 function selfCrosses(ring) {
   const b=boundsOf(ring),count=ring.length-1,cells=Math.min(128,Math.max(1,Math.ceil(Math.sqrt(count/8))));
   if(!b || b.width<EPS || b.height<EPS)return false;
@@ -448,7 +485,11 @@ export function preflight(input) {
     if(open)add(s,'warning','open-cut',`${s.name} contains an open cut path; it will cut a line rather than release a closed piece.`);
     if(tiny)add(s,'warning','tiny-contour',`${s.name} contains a contour smaller than 0.25 mm². Check it against your material and kerf.`);
     if(degenerate)add(s,'error','degenerate-contour',`${s.name} has a closed contour with zero net area. Repair it before cutting.`);
-    if(intersect)add(s,'error','self-intersection',`${s.name} has crossing contours. Repair or combine the outlines before cutting.`);
+    if(intersect) {
+      const crossing=firstPathIntersection(s),rounded=n=>String(Number(n.toFixed(3)));
+      const detail=crossing?` Zero-based contour ${crossing.contourA} edge ${crossing.segmentA.join('→')} intersects contour ${crossing.contourB} edge ${crossing.segmentB.join('→')} near local (${crossing.point.map(rounded).join(', ')}) mm.`:'';
+      add(s,'error','self-intersection',`${s.name} has crossing contours.${detail} Repair or combine the outlines before cutting.`);
+    }
     if(duplicate)add(s,'warning','duplicate-lines',`${s.name} repeats a line already in the drawing. Duplicate cuts can burn material.`);
     if(incomplete)add(s,'warning','complexity-check',`${s.name} is too complex for a complete intersection check. Simplify it or inspect the cutting paths in machine software.`);
   }
