@@ -91,6 +91,20 @@ Model availability depends on the existing Qwen account. Use the application's c
 
 ## Measurements and sketches
 
+### Artwork tracing
+
+Choose **Photo → Upload image** (or **Try Kimi example**), then:
+
+- **Single line** follows the centre of each pen stroke. Paths default to Score.
+- **Outline** follows the boundaries of dark ink, including inner holes. Thick strokes therefore have two borders. Paths default to Cut.
+- **Read dimensions** keeps the existing technical-drawing workflow.
+
+Set artwork width in millimetres, preview, and choose **Keep it**. The result is a group of ordinary editable paths: click a path on the canvas and use More → Points to move its nodes. Common chat commands such as `make it 120 mm wide`, `rotate 30 degrees`, `move right 10 mm`, `smooth this` and `simplify this` run locally and preserve group placement. Other conversations use the existing Qwen connection. The original photo becomes reference-only after accepting a trace.
+
+Tracing uses a browser worker and makes no AI requests. Ink and Simplify controls handle light strokes and excessive points. This prototype accepts up to 60 paths with 240 points each; overly complex inputs ask for a smaller crop or simpler trace. It does not infer physical dimensions from photographs or automatically repair ambiguous crossings. SVG, DXF and editable project export use the same geometry as manual drawing. No new analytics or image collection is added.
+
+The Kimi artwork fixture comes from the user-provided Kimi project. Its original SVG is in `public/examples/kimi-art.svg`; `tests/fixtures/kimi-art-1000x700.rgba.gz` is a lossless RGBA raster of that SVG, compressed with gzip for dependency-free regression tests. Tracer source/license attribution is in `src/vendor/README.md`.
+
 The source of a dimension matters:
 
 - **Specified:** supplied or confirmed by the user.

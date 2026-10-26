@@ -1,3 +1,4 @@
+import {editArtwork} from './art-edit.mjs';
 import {createShape,applyOperations,validateDocument,shapeBounds,preflight} from './geometry.mjs';
 import {validateReply,validateTask,validateVisualReview,isRecipeShape,PROVIDER_BASES,DEFAULT_BASE,profileShape,PROFILE_RECIPES} from '../server/cad-system.mjs';
 import {renderReviewImage} from './review-render.mjs';
@@ -65,6 +66,7 @@ export async function checkConnection(connection=DEFAULT_CONNECTION,signal,fetch
 export async function askAssistant(args, {fetcher=globalThis.fetch,renderer=renderReviewImage,onProgress=args.onProgress}={}) {
   const {question,language='en',document,selectedIds=[],history=[],image,connection=DEFAULT_CONNECTION,signal}=args;
   const dimensioned=args.workflow==='dimensioned';
+  if(!image&&!args.measurementPlan){const localEdit=editArtwork(args);if(localEdit)return localEdit;}
   if(signal?.aborted)throw assistantError('cancelled',language);
   if(dimensioned&&args.measurementPlan){
     const plan=resolveBracket(args.measurementPlan,question),report=bracketReport(plan,language);
