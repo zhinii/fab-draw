@@ -1,4 +1,5 @@
 import polygonClipping from 'polygon-clipping';
+import {retainedBracket} from './measured-bracket.mjs';
 
 // Every coordinate is in millimetres. Curves are flattened only for checks,
 // booleans and DXF; SVG retains the analytical curves. Maximum chord error is
@@ -359,6 +360,7 @@ function rectPath(w,h,r) {
   return `M ${nfmt(r)} 0 H ${nfmt(w-r)} A ${r} ${r} 0 0 1 ${w} ${r} V ${h-r} A ${r} ${r} 0 0 1 ${w-r} ${h} H ${r} A ${r} ${r} 0 0 1 0 ${h-r} V ${r} A ${r} ${r} 0 0 1 ${r} 0 Z`;
 }
 export function shapePath(s) {
+  const measured=retainedBracket(s);if(measured)return measured.svg;
   if(s.type==='ellipse')return circlePath(s.width/2,s.height/2,s.width/2,s.height/2);
   if(s.type==='rect')return rectPath(s.width,s.height,s.params.cornerRadius||0);
   if(s.type==='plate') {const {holeDiameter:d,edgeInset:i,cornerRadius:r}=s.params;return `${rectPath(s.width,s.height,r)} ${circlePath(i,s.height/2,d/2,d/2)} ${circlePath(s.width-i,s.height/2,d/2,d/2)}`;}

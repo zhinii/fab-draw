@@ -1,4 +1,5 @@
 import {applyOperations, validateDocument} from './geometry.mjs';
+import {retainedBracket} from './measured-bracket.mjs';
 
 const fmt=n=>String(Number(n.toFixed(3)));
 const xml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
@@ -9,7 +10,7 @@ export function drawingDimensions(input,{fontSize=2.5}={}) {
   const doc=validateDocument(input),result=[],gap=Math.max(8,fontSize*3),arrow=fontSize*.55;
   for(const s of doc.shapes) {
     if(s.role==='reference'||s.type==='text')continue;
-    const {width:w,height:h}=s;
+    const {width:w,height:h}=s,bracket=retainedBracket(s);
     const world=([x,y])=>{const a=s.rotation*Math.PI/180,c=Math.cos(a),sn=Math.sin(a),dx=x-w/2,dy=y-h/2;return[s.x+w/2+dx*c-dy*sn,s.y+h/2+dx*sn+dy*c];};
     const add=(key,value,label,segments,at,property=null,angle=0)=>{
       const rotation=((s.rotation+angle+90)%180+180)%180-90;
@@ -26,8 +27,24 @@ export function drawingDimensions(input,{fontSize=2.5}={}) {
     if(s.type==='ellipse'&&Math.abs(w-h)<1e-6){
       linear('diameter',[0,h/2],[w,h/2],-gap,'diameter',false,`Ø${fmt(w)}`);
     }else{
-      if(w>0)linear('width',[0,0],[w,0],-gap,s.type==='gear'?null:'width');
-      if(h>0)linear('height',[w,0],[w,h],w+gap,s.type==='gear'?null:'height',true);
+      if(w>0)linear('width',[0,0],[w,0],-gap,s.type==='gear'||bracket?null:'width');
+      if(h>0)linear('height',[w,0],[w,h],w+gap,s.type==='gear'||bracket?null:'height',true);
+    }
+    if(bracket){
+      const p=s.params.measuredBracket,[tl,tr,bl,br,centre]=bracket.holes;
+      linear('columns',[tl.x,h],[tr.x,h],h+gap,null);
+      linear('central-offset',[tl.x,0],[centre.x,0],-gap*2,null);
+      linear('left-spacing',[0,tl.y],[0,bl.y],-gap,null,true);
+      linear('upper-spacing',[w,tr.y],[w,centre.y],w+gap*2,null,true);
+      linear('lower-spacing',[w,centre.y],[w,br.y],w+gap*2,null,true);
+      linear('bottom-arc-offset',[w,br.y],[w,h-p.bottomRadius],w+gap*2,null,true);
+      linear('left-inset',[0,h],[tl.x,h],h+gap*2,null);
+      add('small-holes',p.smallDiameter,`4 × Ø${fmt(p.smallDiameter)}`,[[[tl.x,tl.y],[tl.x+12,tl.y+12]]],[tl.x+22,tl.y+15]);
+      add('centre-hole',p.centreDiameter,`Ø${fmt(p.centreDiameter)}`,[[[centre.x,centre.y],[centre.x-18,centre.y-18]]],[centre.x-18,centre.y-20]);
+      for(const [i,r]of bracket.radii.entries()){
+        const angle=[225,315,45,157.5][i]*Math.PI/180,tip=[r.x+r.r*Math.cos(angle),r.y+r.r*Math.sin(angle)],at=i===0?[-gap,20]:i===1?[w+gap,10]:i===2?[w+gap,r.y+10]:[r.x+10,r.y+25];
+        add(`radius-${i}`,r.r,`R${fmt(r.r)}`,[[tip,[at[0],at[1]-fontSize]]],at);
+      }
     }
     if(s.type==='plate'){
       const inset=s.params.edgeInset,d=s.params.holeDiameter;

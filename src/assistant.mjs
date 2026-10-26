@@ -2,6 +2,7 @@ import {createShape,applyOperations,validateDocument,shapeBounds,preflight} from
 import {validateReply,validateTask,validateVisualReview,isRecipeShape,PROVIDER_BASES,DEFAULT_BASE,profileShape,PROFILE_RECIPES} from '../server/cad-system.mjs';
 import {renderReviewImage} from './review-render.mjs';
 import {expandConstructiveReply} from './construction.mjs';
+import {BRACKET_READ_INSTRUCTION,readBracketPacket,bracketReport,resolveBracket,measuredBracketShape,emptyBracketPlan} from './measured-bracket.mjs';
 
 export const DEFAULT_CONNECTION=Object.freeze({url:'https://bnta-robot-lab-connection.zhinii.chatgpt.site/api/cad'});
 const pick=(language,en,zh)=>language==='zh'?zh:en;
@@ -65,6 +66,18 @@ export async function askAssistant(args, {fetcher=globalThis.fetch,renderer=rend
   const {question,language='en',document,selectedIds=[],history=[],image,connection=DEFAULT_CONNECTION,signal}=args;
   const dimensioned=args.workflow==='dimensioned';
   if(signal?.aborted)throw assistantError('cancelled',language);
+  if(dimensioned&&args.measurementPlan){
+    const plan=resolveBracket(args.measurementPlan,question),report=bracketReport(plan,language);
+    if(!image?.confirmed||!report.canConfirm)return report;
+    const target=args.measurementTargetId?document.shapes.find(s=>s.id===args.measurementTargetId):null;
+    if(args.measurementTargetId&&!target)throw Error('The original bracket no longer exists. Start a new reconstruction.');
+    if(target&&(target.type!=='path'||!target.params?.measuredBracket))throw Error('The selected object is not a measured bracket. Nothing was replaced.');
+    if(target?.locked)throw Error('Unlock this bracket before changing its measurements.');
+    const shape=measuredBracketShape(plan,target?{x:target.x,y:target.y,rotation:target.rotation,name:target.name,role:target.role}:{}),operations=[];
+    if(document.sheet.height<shape.height+60||document.sheet.width<shape.width+60)operations.push({op:'sheet',changes:{width:Math.max(document.sheet.width,shape.width+60),height:Math.max(document.sheet.height,shape.height+60)}});
+    if(target){const {type,...changes}=shape;operations.push({op:'update',id:target.id,changes});}else operations.push({op:'add',shape});
+    return {...report,reply:language==='zh'?'已按确认的尺寸构建圆角支架，包含四个小孔和一个大孔。请检查预览。':'Built the measured bracket with all five holes and true circular fillets. The chosen dimension relationships were checked locally. Review the preview before keeping it.',needsInput:false,operations,requestCount:0};
+  }
   if(connection.mode==='offline'||connection.offline) {
     const result=localAssistant(args);
     if(!result)throw assistantError('offline_unknown',language);
@@ -75,7 +88,7 @@ export async function askAssistant(args, {fetcher=globalThis.fetch,renderer=rend
     config=endpoint(connection);
     const doc=validateDocument(document);
     const focusedQuestion=dimensioned?`Dimensioned drawing prototype: one flat part, one orthographic view, millimetres. Use written or user-confirmed dimensions, never pixel estimates. Ask for missing or conflicting measurements. Supported shapes: plate, rect, circular ellipse, straight path, line. No construct, gear, artistic profiles or tracing of dimension arrows/text. Prefer a plate for two equal holes centred vertically and equally inset from each end; explicitly set cornerRadius (0 for square corners). Preserve hole diameter and edgeInset when changing plate width. For other outlines explain any positions not constrained. User request: ${question}`:question;
-    task=validateTask({question:focusedQuestion,language,document:doc,selectedIds,history:history.slice(-10).filter(m=>['user','assistant'].includes(m.role)).map(m=>({role:m.role,content:String(m.content??m.reply??'').slice(0,4000)})),...(image?{image}:{})});
+    task=validateTask({question:dimensioned&&image?'Dimensioned drawing prototype. '+BRACKET_READ_INSTRUCTION+' IMPORTANT: Put the measurement JSON INSIDE the reply string, enclosed by <bracket> and </bracket>. Do not put measurements in an extra top-level response field, where they would be discarded. The outer response must use reply, needsInput:true, operations:[], assumptions:[], suggestions:[]. For a matching bracket the reply must contain the full block, not a promise to list values. Use the latest user request in history.':focusedQuestion,language,document:doc,selectedIds,history:[...history.slice(-9).filter(m=>['user','assistant'].includes(m.role)).map(m=>({role:m.role,content:String(m.content??m.reply??'').slice(0,4000)})),...(dimensioned&&image?[{role:'user',content:question}]:[])],...(image?{image}:{})});
   } catch(error) { throw assistantError(errors[error.message]?error.message:'geometry',language); }
   const requestSignal=combinedSignal(signal,180000),reviews=[];
   let geometryRepairs=0,revision=0,requestCount=0;
@@ -113,6 +126,13 @@ export async function askAssistant(args, {fetcher=globalThis.fetch,renderer=rend
     let result,preview,newShapes,geometryIssue,sourceOperations;
     try {
       const proposed=validateReply(data,{imageConfirmed:!image||image.confirmed===true,document,language});
+      if(dimensioned&&image){
+        const plan=readBracketPacket(proposed.reply);if(plan)return bracketReport(plan,language);
+        const description=[proposed.reply,...proposed.assumptions,...history.map(m=>m.content)].join(' ');
+        if(/bracket|支架/i.test(description)&&/round|R\s*20|圆角/i.test(description)){
+          return {...bracketReport(emptyBracketPlan(),language),reply:language==='zh'?'识别出了圆角支架，但未能可靠提取完整尺寸。尚未生成图形。请打开“尺寸读数”核对填写；不要反复发送确认消息。':'The rounded bracket was recognised, but a complete structured measurement reading was not returned. Nothing has been drawn. Open Measurements to review/fill the values rather than repeatedly confirming an incomplete reading.'};
+        }
+      }
       sourceOperations=proposed.operations;
       result=expandConstructiveReply(proposed,document);
       // Atomic validation uses the same model as mouse editing and fabrication export.

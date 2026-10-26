@@ -8,6 +8,12 @@ The drawing is stored as geometry in millimetres. Qwen interprets the request an
 
 ## Try it
 
+**Rounded five-hole bracket:** choose **Shapes → Bracket example** for the supplied drawing using its lower 40/75 mm dimension chain, or open [the editable bracket project](public/examples/rounded-bracket.fabdraw). The result is one part with four Ø15 holes, one Ø30 hole, three R15 fillets and one R20 fillet. SVG retains circular arcs; DXF uses polylines with at most 0.01 mm arc chord error for this builder.
+
+For uploaded brackets, Qwen attempts a structured measurement reading. Conflicting, missing or inconsistent measurements block construction. Use **Measurements** beside the upload to review individual values and their reference lines; choose the dimension chain, confirm, then build locally. “Use the lower 40 and 75 mm dimensions” resolves that chain in chat without another provider request. The manual **Bracket measurements** button also works without Qwen. Changing reviewed measurements after keeping a reconstruction updates that part rather than adding another copy.
+
+The live reader is still imperfect: the supplied image's lower labels were not all recovered in the two bounded Qwen tests. The app now exposes this uncertainty instead of inventing geometry. The successful browser reconstruction used reviewed measurements, not an unassisted image conversion. This measured builder supports the displayed 45° rounded-bracket family; it is not a general engineering-drawing solver.
+
 1. Choose **Photo** and upload a clear dimensioned image of one flat part. Send the prefilled request to read its measurements. Check the readings in the conversation, then choose **Confirm readings** and **Send**.
 2. Review the reconstructed preview and choose **Keep it**. For the plate example, check 80 × 40 mm, two Ø5 holes, 15 mm end offsets, square corners and vertically centred holes.
 3. Ask **“Make the plate 100 mm wide, keeping the holes and end offsets unchanged.”** Keep the preview. The right hole moves to 85 mm from the left edge; the left hole remains at 15 mm.
