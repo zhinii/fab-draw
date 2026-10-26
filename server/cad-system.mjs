@@ -3,7 +3,7 @@
 import {validateConstructOperation} from './construction-schema.mjs';
 export const DEFAULT_BASE = 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1';
 export const DEFAULT_MODEL = 'qwen3.8-flash';
-export const DEFAULT_VISION_MODEL = 'qwen3.7-plus';
+export const DEFAULT_VISION_MODEL = 'qwen3.8-max';
 export const PROVIDER_BASES = new Set([
   DEFAULT_BASE,
   'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',

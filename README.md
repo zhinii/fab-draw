@@ -83,7 +83,7 @@ If no environment key is configured, the server reads the existing `~/.config/bn
 | `ALIBABA_API_KEY` | Server-only Qwen credential, overriding the existing configuration key. |
 | `ALIBABA_BASE_URL` | Qwen-compatible base URL; defaults to the Alibaba Token Plan endpoint. |
 | `ALIBABA_MODEL` | Language model; default `qwen3.8-flash`. |
-| `ALIBABA_VISION_MODEL` | Image model; default `qwen3.7-plus`. |
+| `ALIBABA_VISION_MODEL` | Image model; default `qwen3.8-max`. Text-only requests retain `qwen3.8-flash`. |
 | `FAB_DRAW_CONFIG` | Optional path to the existing private Robot Lab JSON configuration. |
 | `FAB_DRAW_PORT` | Local serving port; default `4227`. |
 

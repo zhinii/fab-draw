@@ -31,7 +31,7 @@ test('configuration reuse is read-only and never leaks keys',async()=>{
   const folder=await mkdtemp(join(tmpdir(),'fab-draw-config-')),path=join(folder,'server.json');
   try {
     const data=JSON.stringify({key:'test-only-key',base:'https://dashscope.aliyuncs.com/compatible-mode/v1',model:'qwen3.8-flash'});await writeFile(path,data);
-    const config=await loadConfiguration({FAB_DRAW_CONFIG:path});assert.equal(config.key,'test-only-key');assert.equal(config.visionModel,'qwen3.7-plus');
+    const config=await loadConfiguration({FAB_DRAW_CONFIG:path});assert.equal(config.key,'test-only-key');assert.equal(config.visionModel,'qwen3.8-max');
     const override=await loadConfiguration({FAB_DRAW_CONFIG:path,ALIBABA_API_KEY:'env-only-key'});assert.equal(override.key,'env-only-key');
     const missing=await loadConfiguration({FAB_DRAW_CONFIG:join(folder,'missing.json')});assert.equal(missing,null);
   } finally { await rm(folder,{recursive:true,force:true}); }
